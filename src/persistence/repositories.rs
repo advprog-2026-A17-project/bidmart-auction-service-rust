@@ -117,15 +117,17 @@ impl OutboxRepository {
 
     pub async fn insert(&self, event: &NewOutboxEventRecord) -> Result<OutboxEventRecord, sqlx::Error> {
         sqlx::query_as::<_, OutboxEventRecord>(
-            "INSERT INTO outbox_events (id, event_type, payload, published, created_at, published_at) \
-             VALUES (?, ?, ?, ?, ?, ?) \
-             RETURNING id, event_type, payload, published, created_at, published_at"
+            "INSERT INTO outbox_events (id, aggregate_id, event_type, payload, published, created_at, updated_at, published_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             RETURNING id, aggregate_id, event_type, payload, published, published_at, created_at, updated_at"
         )
         .bind(&event.id)
+        .bind(&event.aggregate_id)
         .bind(&event.event_type)
         .bind(&event.payload)
-        .bind(event.published)
+        .bind(event.published as i32)
         .bind(event.created_at)
+        .bind(event.updated_at)
         .bind(event.published_at)
         .fetch_one(&self.pool)
         .await
@@ -136,7 +138,7 @@ impl OutboxRepository {
         limit: i64,
     ) -> Result<Vec<OutboxEventRecord>, sqlx::Error> {
         sqlx::query_as::<_, OutboxEventRecord>(
-            "SELECT id, event_type, payload, published, created_at, published_at \
+            "SELECT id, aggregate_id, event_type, payload, published, published_at, created_at, updated_at \
              FROM outbox_events WHERE published = 0 \
              ORDER BY created_at ASC \
              LIMIT ?"
@@ -152,8 +154,9 @@ impl OutboxRepository {
         published_at: i64,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "UPDATE outbox_events SET published = 1, published_at = ? WHERE id = ?"
+            "UPDATE outbox_events SET published = 1, published_at = ?, updated_at = ? WHERE id = ?"
         )
+        .bind(published_at)
         .bind(published_at)
         .bind(event_id)
         .execute(&self.pool)

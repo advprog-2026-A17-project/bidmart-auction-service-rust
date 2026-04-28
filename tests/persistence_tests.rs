@@ -1,8 +1,8 @@
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord};
-use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository};
+use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord, NewOutboxEventRecord};
+use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 
 async fn setup_test_db() -> SqlitePool {
     // Use in-memory SQLite database
@@ -126,4 +126,73 @@ async fn test_insert_and_list_bids() {
         .expect("find winning");
     assert!(winning.is_some());
     assert_eq!(winning.unwrap().bid_amount_cents, 2000);
+}
+
+#[tokio::test]
+async fn test_outbox_insert_list_and_mark_published() {
+    let pool = setup_test_db().await;
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let now = 1_700_000_000i64;
+    let event_id1 = Uuid::new_v4().to_string();
+    let event_id2 = Uuid::new_v4().to_string();
+    let auction_id = Uuid::new_v4().to_string();
+
+    // Insert pending events
+    let new_event1 = NewOutboxEventRecord {
+        id: event_id1.clone(),
+        aggregate_id: auction_id.clone(),
+        event_type: "BidPlaced".to_string(),
+        payload: r#"{"auction_id":"auction-1","bidder_id":"user-1"}"#.to_string(),
+        published: false,
+        published_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let inserted1 = outbox_repo
+        .insert(&new_event1)
+        .await
+        .expect("insert event 1");
+    assert_eq!(inserted1.id, event_id1);
+    assert!(!inserted1.published);
+
+    let new_event2 = NewOutboxEventRecord {
+        id: event_id2.clone(),
+        aggregate_id: auction_id.clone(),
+        event_type: "AuctionEnded".to_string(),
+        payload: r#"{"auction_id":"auction-1"}"#.to_string(),
+        published: false,
+        published_at: None,
+        created_at: now + 1,
+        updated_at: now + 1,
+    };
+
+    outbox_repo
+        .insert(&new_event2)
+        .await
+        .expect("insert event 2");
+
+    // List pending events (should be in created_at order)
+    let pending = outbox_repo
+        .list_pending(10)
+        .await
+        .expect("list pending");
+    assert_eq!(pending.len(), 2);
+    assert_eq!(pending[0].id, event_id1); // First inserted
+    assert_eq!(pending[1].id, event_id2); // Second inserted
+
+    // Mark first event as published
+    outbox_repo
+        .mark_published(&event_id1, now + 100)
+        .await
+        .expect("mark published");
+
+    // List pending again (should only have event2)
+    let pending_after = outbox_repo
+        .list_pending(10)
+        .await
+        .expect("list pending after");
+    assert_eq!(pending_after.len(), 1);
+    assert_eq!(pending_after[0].id, event_id2);
 }

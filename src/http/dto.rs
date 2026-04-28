@@ -5,26 +5,56 @@ use crate::service::auction_service::CreateAuctionCommand;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateAuctionRequest {
-    pub listing_id: String,
-    pub seller_id: String,
-    pub starting_price_cents: i64,
-    pub reserve_price_cents: i64,
-    pub minimum_increment_cents: i64,
-    pub start_time: i64,
-    pub end_time: i64,
+    #[serde(default, alias = "listingId")]
+    pub listing_id: Option<String>,
+    #[serde(default, alias = "sellerId")]
+    pub seller_id: Option<String>,
+    #[serde(default)]
+    pub starting_price_cents: Option<i64>,
+    #[serde(default, rename = "startingPrice")]
+    pub starting_price: Option<f64>,
+    #[serde(default)]
+    pub reserve_price_cents: Option<i64>,
+    #[serde(default, rename = "reservePrice")]
+    pub reserve_price: Option<f64>,
+    #[serde(default)]
+    pub minimum_increment_cents: Option<i64>,
+    #[serde(default, rename = "minimumIncrement")]
+    pub minimum_increment: Option<f64>,
+    #[serde(default)]
+    pub start_time: Option<i64>,
+    #[serde(default, rename = "startTime")]
+    pub start_time_api: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<i64>,
+    #[serde(default, rename = "endTime")]
+    pub end_time_api: Option<String>,
 }
 
-impl From<CreateAuctionRequest> for CreateAuctionCommand {
-    fn from(request: CreateAuctionRequest) -> Self {
-        Self {
-            listing_id: request.listing_id,
-            seller_id: request.seller_id,
-            starting_price_cents: request.starting_price_cents,
-            reserve_price_cents: request.reserve_price_cents,
-            minimum_increment_cents: request.minimum_increment_cents,
-            start_time: request.start_time,
-            end_time: request.end_time,
-        }
+impl CreateAuctionRequest {
+    pub fn try_into_command(self) -> Result<CreateAuctionCommand, String> {
+        Ok(CreateAuctionCommand {
+            listing_id: self
+                .listing_id
+                .ok_or_else(|| "listing_id is required".to_string())?,
+            seller_id: self
+                .seller_id
+                .ok_or_else(|| "seller_id is required".to_string())?,
+            starting_price_cents: self
+                .starting_price_cents
+                .or_else(|| self.starting_price.map(decimal_to_cents))
+                .ok_or_else(|| "starting_price is required".to_string())?,
+            reserve_price_cents: self
+                .reserve_price_cents
+                .or_else(|| self.reserve_price.map(decimal_to_cents))
+                .ok_or_else(|| "reserve_price is required".to_string())?,
+            minimum_increment_cents: self
+                .minimum_increment_cents
+                .or_else(|| self.minimum_increment.map(decimal_to_cents))
+                .ok_or_else(|| "minimum_increment is required".to_string())?,
+            start_time: resolve_unix_seconds(self.start_time, self.start_time_api, "start_time")?,
+            end_time: resolve_unix_seconds(self.end_time, self.end_time_api, "end_time")?,
+        })
     }
 }
 
@@ -180,6 +210,21 @@ fn cents_to_decimal(cents: i64) -> f64 {
 
 fn decimal_to_cents(amount: f64) -> i64 {
     (amount * 100.0).round() as i64
+}
+
+fn resolve_unix_seconds(
+    unix_seconds: Option<i64>,
+    rfc3339: Option<String>,
+    field: &str,
+) -> Result<i64, String> {
+    if let Some(value) = unix_seconds {
+        return Ok(value);
+    }
+
+    let value = rfc3339.ok_or_else(|| format!("{field} is required"))?;
+    chrono::DateTime::parse_from_rfc3339(&value)
+        .map(|datetime| datetime.timestamp())
+        .map_err(|_| format!("{field} must be unix seconds or RFC3339"))
 }
 
 fn unix_seconds_to_rfc3339(seconds: i64) -> String {

@@ -36,7 +36,8 @@ async fn create_auction(
     State(state): State<AppState>,
     Json(request): Json<CreateAuctionRequest>,
 ) -> Result<(StatusCode, Json<AuctionResponse>), ApiError> {
-    let auction = state.auction_service.create_auction(request.into()).await?;
+    let command = request.try_into_command().map_err(ApiError::bad_request)?;
+    let auction = state.auction_service.create_auction(command).await?;
     Ok((StatusCode::CREATED, Json(auction.into())))
 }
 

@@ -7,6 +7,16 @@ fn docker_compose_routes_gateway_auction_traffic_to_rust_service() {
     assert!(compose.contains("BIND_ADDRESS: 0.0.0.0:8082"));
     assert!(compose.contains("DATABASE_URL: sqlite:///data/bidmart-auction.db"));
     assert!(compose.contains("auction-rust-data:/data"));
+
+    let auction_service_block = compose
+        .split("  auction-service:")
+        .nth(1)
+        .expect("compose has auction service")
+        .split("  #")
+        .next()
+        .expect("read auction service block");
+    assert!(auction_service_block.contains("CATALOGUE_SERVICE_URL: http://catalogue-service:8081"));
+    assert!(auction_service_block.contains("- catalogue-service"));
 }
 
 #[test]

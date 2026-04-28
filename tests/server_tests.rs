@@ -3,7 +3,7 @@ use axum::http::{Method, Request, StatusCode};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tower::ServiceExt;
 
-use bidmart_auction_service_rust::server::build_router;
+use bidmart_auction_service_rust::server::{build_router, catalog_client_from_url};
 
 async fn setup_test_db() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
@@ -48,4 +48,19 @@ async fn build_router_wires_service_repositories_into_http_app() {
         .expect("call app");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[test]
+fn catalog_client_from_url_builds_http_catalog_client_when_configured() {
+    let client = catalog_client_from_url(Some("http://catalogue-service:8081"))
+        .expect("build catalog client");
+
+    assert!(client.is_some());
+}
+
+#[test]
+fn catalog_client_from_url_skips_catalog_client_when_unconfigured() {
+    let client = catalog_client_from_url(None).expect("build catalog client");
+
+    assert!(client.is_none());
 }

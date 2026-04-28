@@ -173,6 +173,10 @@ impl From<PlaceBidError> for ApiError {
                 status: StatusCode::BAD_REQUEST,
                 message: error.to_string(),
             },
+            PlaceBidError::CatalogError(message) => Self {
+                status: StatusCode::BAD_REQUEST,
+                message,
+            },
             PlaceBidError::WalletError(message) => Self {
                 status: StatusCode::PAYMENT_REQUIRED,
                 message,

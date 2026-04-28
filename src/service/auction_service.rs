@@ -167,6 +167,8 @@ impl AuctionService {
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
             .ok_or(PlaceBidError::AuctionNotFound)?;
+        self.validate_listing_for_bid(&auction_record.listing_id)
+            .await?;
 
         // Convert to domain object with current highest bid
         let mut auction = self
@@ -277,6 +279,25 @@ impl AuctionService {
             status,
             current_highest,
         ))
+    }
+
+    async fn validate_listing_for_bid(&self, listing_id: &str) -> Result<(), PlaceBidError> {
+        let Some(catalog_client) = &self.catalog_client else {
+            return Ok(());
+        };
+
+        let listing = catalog_client
+            .get_listing_summary(listing_id)
+            .await
+            .map_err(|error| PlaceBidError::CatalogError(error.to_string()))?;
+
+        if !listing.status.eq_ignore_ascii_case("ACTIVE") {
+            return Err(PlaceBidError::CatalogError(
+                "Listing is not active".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     fn status_to_string(&self, status: crate::auction::AuctionStatus) -> String {
@@ -421,6 +442,7 @@ pub enum ListBidsError {
 pub enum PlaceBidError {
     AuctionNotFound,
     BidError(BidError),
+    CatalogError(String),
     WalletError(String),
     DatabaseError(String),
 }
@@ -430,6 +452,7 @@ impl std::fmt::Display for PlaceBidError {
         match self {
             PlaceBidError::AuctionNotFound => write!(f, "Auction not found"),
             PlaceBidError::BidError(e) => write!(f, "{:?}", e),
+            PlaceBidError::CatalogError(e) => write!(f, "Catalog error: {}", e),
             PlaceBidError::WalletError(e) => write!(f, "Wallet error: {}", e),
             PlaceBidError::DatabaseError(e) => write!(f, "Database error: {}", e),
         }

@@ -105,6 +105,73 @@ async fn create_auction_returns_created_auction_response() {
 }
 
 #[tokio::test]
+async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let start_time = chrono::DateTime::<chrono::Utc>::from_timestamp(1_900_000_000, 0)
+        .expect("valid start time")
+        .to_rfc3339();
+    let end_time = chrono::DateTime::<chrono::Utc>::from_timestamp(1_900_003_600, 0)
+        .expect("valid end time")
+        .to_rfc3339();
+    let request_body = json!({
+        "listingId": "listing-create-gateway",
+        "sellerId": "seller-create-gateway",
+        "startingPrice": 25.5,
+        "reservePrice": 50.0,
+        "minimumIncrement": 2.5,
+        "startTime": start_time,
+        "endTime": end_time
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auctions")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    let auction_id = response_body["id"]
+        .as_str()
+        .expect("response has auction id");
+
+    assert_eq!(response_body["listingId"], json!("listing-create-gateway"));
+    assert_eq!(response_body["sellerId"], json!("seller-create-gateway"));
+    assert_eq!(response_body["startingPrice"], json!(25.5));
+    assert_eq!(response_body["reservePrice"], json!(50.0));
+    assert_eq!(response_body["minimumIncrement"], json!(2.5));
+
+    let persisted = auction_repo
+        .find_by_id(auction_id)
+        .await
+        .expect("find persisted auction")
+        .expect("auction persisted");
+    assert_eq!(persisted.listing_id, "listing-create-gateway");
+    assert_eq!(persisted.seller_id, "seller-create-gateway");
+    assert_eq!(persisted.starting_price_cents, 2550);
+    assert_eq!(persisted.reserve_price_cents, 5000);
+    assert_eq!(persisted.minimum_increment_cents, 250);
+    assert_eq!(persisted.start_time, 1_900_000_000);
+    assert_eq!(persisted.end_time, 1_900_003_600);
+}
+
+#[tokio::test]
 async fn get_auction_by_id_returns_auction_response() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

@@ -23,6 +23,10 @@ impl MockCatalogClient {
             listing: Arc::new(Mutex::new(Ok(listing))),
         }
     }
+
+    fn set_listing(&self, listing: ListingSummary) {
+        *self.listing.lock().expect("catalog lock") = Ok(listing);
+    }
 }
 
 #[async_trait::async_trait]
@@ -147,4 +151,37 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
     assert_eq!(auction.listing_id, command.listing_id);
     assert_eq!(auction.seller_id, command.seller_id);
     assert_eq!(auction_repo.list_all().await.expect("list auctions").len(), 1);
+}
+
+#[tokio::test]
+async fn place_bid_rejects_inactive_catalog_listing() {
+    let command = create_command();
+    let catalog_client = Arc::new(MockCatalogClient::new(ListingSummary {
+        id: command.listing_id.clone(),
+        seller_id: command.seller_id.clone(),
+        status: "ACTIVE".to_string(),
+    }));
+    let (service, _auction_repo) = service_with_catalog(catalog_client.clone()).await;
+    let auction = service
+        .create_auction(command.clone())
+        .await
+        .expect("create auction");
+
+    catalog_client.set_listing(ListingSummary {
+        id: command.listing_id,
+        seller_id: command.seller_id,
+        status: "CANCELLED".to_string(),
+    });
+
+    let result = service
+        .place_bid_and_persist(&auction.id, "bidder-catalog-1", 1500, auction.start_time + 10)
+        .await;
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Listing is not active"));
+    assert!(service
+        .list_bids(&auction.id)
+        .await
+        .expect("list bids")
+        .is_empty());
 }

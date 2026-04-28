@@ -1,0 +1,104 @@
+use axum::body::{to_bytes, Body};
+use axum::http::{Method, Request, StatusCode};
+use serde_json::{json, Value};
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use tower::ServiceExt;
+
+use bidmart_auction_service_rust::http::router::create_router;
+use bidmart_auction_service_rust::persistence::repositories::{
+    AuctionRepository, BidRepository, OutboxRepository,
+};
+use bidmart_auction_service_rust::service::auction_service::AuctionService;
+
+async fn setup_test_db() -> SqlitePool {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("connect to in-memory db");
+
+    let sql = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("migrations/20260428000000_init.sql"),
+    )
+    .expect("read migration");
+
+    for statement in sql.split(';') {
+        let trimmed = statement.trim();
+        if !trimmed.is_empty() {
+            sqlx::query(trimmed)
+                .execute(&pool)
+                .await
+                .expect("execute migration");
+        }
+    }
+
+    pool
+}
+
+#[tokio::test]
+async fn create_auction_returns_created_auction_response() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    let request_body = json!({
+        "listing_id": "listing-1",
+        "seller_id": "seller-1",
+        "starting_price_cents": 1000,
+        "reserve_price_cents": 5000,
+        "minimum_increment_cents": 200,
+        "start_time": now - 60,
+        "end_time": now + 600
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/auctions")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+
+    let auction_id = response_body["id"]
+        .as_str()
+        .expect("response has auction id")
+        .to_string();
+    assert!(!auction_id.is_empty());
+    assert_eq!(response_body["listing_id"], json!("listing-1"));
+    assert_eq!(response_body["seller_id"], json!("seller-1"));
+    assert_eq!(response_body["starting_price_cents"], json!(1000));
+    assert_eq!(response_body["reserve_price_cents"], json!(5000));
+    assert_eq!(response_body["minimum_increment_cents"], json!(200));
+    assert_eq!(response_body["current_highest_bid_cents"], Value::Null);
+    assert_eq!(response_body["status"], json!("ACTIVE"));
+    assert_eq!(response_body["start_time"], json!(now - 60));
+    assert_eq!(response_body["end_time"], json!(now + 600));
+
+    let persisted = auction_repo
+        .find_by_id(&auction_id)
+        .await
+        .expect("find persisted auction")
+        .expect("auction persisted");
+    assert_eq!(persisted.listing_id, "listing-1");
+    assert_eq!(persisted.seller_id, "seller-1");
+    assert_eq!(persisted.starting_price_cents, 1000);
+    assert_eq!(persisted.reserve_price_cents, 5000);
+    assert_eq!(persisted.minimum_increment_cents, 200);
+    assert_eq!(persisted.status, "ACTIVE");
+}

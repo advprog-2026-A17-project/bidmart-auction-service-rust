@@ -34,13 +34,7 @@ impl AuctionService {
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
     ) -> Self {
-        Self {
-            auction_repo,
-            bid_repo,
-            outbox_repo,
-            wallet_client: None,
-            catalog_client: None,
-        }
+        Self::with_clients(auction_repo, bid_repo, outbox_repo, None, None)
     }
 
     pub fn new_with_wallet(
@@ -49,13 +43,7 @@ impl AuctionService {
         outbox_repo: OutboxRepository,
         wallet_client: Arc<dyn WalletClient>,
     ) -> Self {
-        Self {
-            auction_repo,
-            bid_repo,
-            outbox_repo,
-            wallet_client: Some(wallet_client),
-            catalog_client: None,
-        }
+        Self::with_clients(auction_repo, bid_repo, outbox_repo, Some(wallet_client), None)
     }
 
     pub fn new_with_catalog(
@@ -64,12 +52,22 @@ impl AuctionService {
         outbox_repo: OutboxRepository,
         catalog_client: Arc<dyn CatalogClient>,
     ) -> Self {
+        Self::with_clients(auction_repo, bid_repo, outbox_repo, None, Some(catalog_client))
+    }
+
+    fn with_clients(
+        auction_repo: AuctionRepository,
+        bid_repo: BidRepository,
+        outbox_repo: OutboxRepository,
+        wallet_client: Option<Arc<dyn WalletClient>>,
+        catalog_client: Option<Arc<dyn CatalogClient>>,
+    ) -> Self {
         Self {
             auction_repo,
             bid_repo,
             outbox_repo,
-            wallet_client: None,
-            catalog_client: Some(catalog_client),
+            wallet_client,
+            catalog_client,
         }
     }
 

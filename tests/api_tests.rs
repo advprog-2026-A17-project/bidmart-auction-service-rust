@@ -388,6 +388,74 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
 }
 
 #[tokio::test]
+async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-bid-gateway".to_string(),
+        seller_id: "seller-bid-gateway".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+
+    let request_body = json!({
+        "bidderId": "bidder-gateway",
+        "bidAmount": 15.5
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+
+    assert_eq!(response_body["auctionId"], json!(auction_id));
+    assert_eq!(response_body["bidderId"], json!("bidder-gateway"));
+    assert_eq!(response_body["bidAmount"], json!(15.5));
+    assert!(response_body["bidTime"].as_str().is_some());
+
+    let bids = bid_repo
+        .list_by_auction_id_desc(&auction_id)
+        .await
+        .expect("list bids");
+    assert_eq!(bids.len(), 1);
+    assert_eq!(bids[0].bidder_id, "bidder-gateway");
+    assert_eq!(bids[0].bid_amount_cents, 1550);
+}
+
+#[tokio::test]
 async fn list_bids_returns_bid_history_for_auction() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

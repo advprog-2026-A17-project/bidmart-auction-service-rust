@@ -96,6 +96,12 @@ pub enum AuctionStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuctionOutcome {
+    Won,   // Reserve met and has winner
+    Unsold, // Reserve not met or no bids
+}
+
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum AuctionStateError {
     #[error("auction cannot start before start time")]
@@ -333,5 +339,12 @@ impl Auction {
             return true;
         }
         false
+    }
+
+    pub fn determine_outcome(&self) -> AuctionOutcome {
+        match &self.current_highest {
+            Some(bid) if bid.amount >= self.reserve_price => AuctionOutcome::Won,
+            _ => AuctionOutcome::Unsold,
+        }
     }
 }

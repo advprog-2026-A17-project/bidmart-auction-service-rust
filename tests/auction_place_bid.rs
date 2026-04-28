@@ -1,5 +1,5 @@
 use bidmart_auction_service_rust::auction::{
-    Auction, AuctionStateError, AuctionStatus, BidError, Money, UnixSeconds, UserId,
+    Auction, AuctionOutcome, AuctionStateError, AuctionStatus, BidError, Money, UnixSeconds, UserId,
 };
 
 fn sample_auction(start_at: u64, end_at: u64) -> Auction {
@@ -242,4 +242,100 @@ fn reject_bid_after_end_time() {
     );
 
     assert!(matches!(result, Err(BidError::AuctionEnded { .. })));
+}
+
+#[test]
+fn scheduled_status_on_creation() {
+    let auction = sample_auction(100, 200);
+    assert_eq!(auction.status(), AuctionStatus::Scheduled);
+}
+
+#[test]
+fn active_status_after_activation() {
+    let mut auction = sample_auction(100, 200);
+    activate_auction(&mut auction, 100);
+    assert_eq!(auction.status(), AuctionStatus::Active);
+}
+
+#[test]
+fn extended_status_when_bid_in_anti_snipe_window() {
+    let mut auction = sample_auction(0, 300);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(250),
+        )
+        .expect("bid should be accepted");
+
+    assert_eq!(auction.status(), AuctionStatus::Extended);
+}
+
+#[test]
+fn remains_active_when_bid_not_in_anti_snipe_window() {
+    let mut auction = sample_auction(0, 300);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(100),
+        )
+        .expect("bid should be accepted");
+
+    assert_eq!(auction.status(), AuctionStatus::Active);
+}
+
+#[test]
+fn auction_cannot_be_reactivated() {
+    let mut auction = sample_auction(100, 200);
+    activate_auction(&mut auction, 100);
+
+    let result = auction.activate(UnixSeconds::new(150));
+    assert!(result.is_ok()); // Activating when already active is OK
+    assert_eq!(auction.status(), AuctionStatus::Active);
+}
+
+#[test]
+fn determine_won_when_reserve_met_after_end() {
+    let mut auction = sample_auction(0, 100);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(50_00),
+            UnixSeconds::new(50),
+        )
+        .expect("bid should be accepted");
+
+    let result = auction.determine_outcome();
+    assert_eq!(result, AuctionOutcome::Won);
+}
+
+#[test]
+fn determine_unsold_when_reserve_not_met() {
+    let mut auction = sample_auction(0, 100);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(50),
+        )
+        .expect("bid should be accepted");
+
+    let result = auction.determine_outcome();
+    assert_eq!(result, AuctionOutcome::Unsold);
+}
+
+#[test]
+fn determine_unsold_when_no_bids() {
+    let auction = sample_auction(0, 100);
+    let result = auction.determine_outcome();
+    assert_eq!(result, AuctionOutcome::Unsold);
 }

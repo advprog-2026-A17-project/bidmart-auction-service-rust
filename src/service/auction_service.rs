@@ -53,6 +53,16 @@ impl AuctionService {
             .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))
     }
 
+    pub async fn get_auction_by_id(
+        &self,
+        auction_id: &str,
+    ) -> Result<Option<AuctionRecord>, GetAuctionError> {
+        self.auction_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))
+    }
+
     /// Place a bid on an auction
     pub async fn place_bid_and_persist(
         &self,
@@ -199,6 +209,12 @@ fn initial_status(start_time: i64, now: i64) -> String {
 pub enum CreateAuctionError {
     #[error("{0}")]
     InvalidInput(String),
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+}
+
+#[derive(Debug, Error)]
+pub enum GetAuctionError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 }

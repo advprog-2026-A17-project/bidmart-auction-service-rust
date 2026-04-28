@@ -1,11 +1,11 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use crate::http::dto::{AuctionResponse, CreateAuctionRequest, ErrorResponse};
-use crate::service::auction_service::{AuctionService, CreateAuctionError};
+use crate::service::auction_service::{AuctionService, CreateAuctionError, GetAuctionError};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -15,6 +15,7 @@ pub struct AppState {
 pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/auctions", post(create_auction))
+        .route("/auctions/:auction_id", get(get_auction_by_id))
         .with_state(AppState { auction_service })
 }
 
@@ -26,10 +27,32 @@ async fn create_auction(
     Ok((StatusCode::CREATED, Json(auction.into())))
 }
 
+async fn get_auction_by_id(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+) -> Result<Json<AuctionResponse>, ApiError> {
+    let auction = state
+        .auction_service
+        .get_auction_by_id(&auction_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("auction not found"))?;
+
+    Ok(Json(auction.into()))
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     message: String,
+}
+
+impl ApiError {
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
 }
 
 impl From<CreateAuctionError> for ApiError {
@@ -40,6 +63,17 @@ impl From<CreateAuctionError> for ApiError {
                 message,
             },
             CreateAuctionError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<GetAuctionError> for ApiError {
+    fn from(error: GetAuctionError) -> Self {
+        match error {
+            GetAuctionError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

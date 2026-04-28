@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
-use crate::client::{WalletClient, HoldFundsRequest};
+use crate::client::{CatalogClient, HoldFundsRequest, WalletClient};
 use crate::persistence::models::{
     AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
@@ -13,6 +13,7 @@ pub struct AuctionService {
     bid_repo: BidRepository,
     outbox_repo: OutboxRepository,
     wallet_client: Option<Arc<dyn WalletClient>>,
+    catalog_client: Option<Arc<dyn CatalogClient>>,
 }
 
 impl std::fmt::Debug for AuctionService {
@@ -22,6 +23,7 @@ impl std::fmt::Debug for AuctionService {
             .field("bid_repo", &"<BidRepository>")
             .field("outbox_repo", &"<OutboxRepository>")
             .field("wallet_client", &"<WalletClient>")
+            .field("catalog_client", &"<CatalogClient>")
             .finish()
     }
 }
@@ -37,6 +39,7 @@ impl AuctionService {
             bid_repo,
             outbox_repo,
             wallet_client: None,
+            catalog_client: None,
         }
     }
 
@@ -51,6 +54,22 @@ impl AuctionService {
             bid_repo,
             outbox_repo,
             wallet_client: Some(wallet_client),
+            catalog_client: None,
+        }
+    }
+
+    pub fn new_with_catalog(
+        auction_repo: AuctionRepository,
+        bid_repo: BidRepository,
+        outbox_repo: OutboxRepository,
+        catalog_client: Arc<dyn CatalogClient>,
+    ) -> Self {
+        Self {
+            auction_repo,
+            bid_repo,
+            outbox_repo,
+            wallet_client: None,
+            catalog_client: Some(catalog_client),
         }
     }
 
@@ -59,6 +78,7 @@ impl AuctionService {
         command: CreateAuctionCommand,
     ) -> Result<AuctionRecord, CreateAuctionError> {
         command.validate()?;
+        self.validate_listing_for_auction(&command).await?;
 
         let now = chrono::Utc::now().timestamp();
         let auction = NewAuctionRecord {
@@ -80,6 +100,34 @@ impl AuctionService {
             .insert(&auction)
             .await
             .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))
+    }
+
+    async fn validate_listing_for_auction(
+        &self,
+        command: &CreateAuctionCommand,
+    ) -> Result<(), CreateAuctionError> {
+        let Some(catalog_client) = &self.catalog_client else {
+            return Ok(());
+        };
+
+        let listing = catalog_client
+            .get_listing_summary(&command.listing_id)
+            .await
+            .map_err(|error| CreateAuctionError::InvalidInput(error.to_string()))?;
+
+        if !listing.status.eq_ignore_ascii_case("ACTIVE") {
+            return Err(CreateAuctionError::InvalidInput(
+                "Listing is not active".to_string(),
+            ));
+        }
+
+        if listing.seller_id != command.seller_id {
+            return Err(CreateAuctionError::InvalidInput(
+                "Listing seller does not match auction seller".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     pub async fn get_auction_by_id(

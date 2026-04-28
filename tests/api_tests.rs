@@ -225,6 +225,89 @@ async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
 }
 
 #[tokio::test]
+async fn api_v1_list_auctions_returns_gateway_compatible_page() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    let first_auction = NewAuctionRecord {
+        id: "auction-list-1".to_string(),
+        listing_id: "listing-list-1".to_string(),
+        seller_id: "seller-list-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 3000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 100,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    let second_auction = NewAuctionRecord {
+        id: "auction-list-2".to_string(),
+        listing_id: "listing-list-2".to_string(),
+        seller_id: "seller-list-2".to_string(),
+        starting_price_cents: 2500,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: Some(3200),
+        minimum_increment_cents: 250,
+        status: "ACTIVE".to_string(),
+        start_time: now - 60,
+        end_time: now + 1200,
+        created_at: now + 1,
+        updated_at: now + 1,
+    };
+    auction_repo
+        .insert(&first_auction)
+        .await
+        .expect("insert first auction");
+    auction_repo
+        .insert(&second_auction)
+        .await
+        .expect("insert second auction");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/auctions")
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    let items = response_body["items"]
+        .as_array()
+        .expect("response has page items");
+
+    assert_eq!(response_body["page"], json!(0));
+    assert_eq!(response_body["size"], json!(2));
+    assert_eq!(response_body["totalItems"], json!(2));
+    assert_eq!(response_body["totalPages"], json!(1));
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["id"], json!("auction-list-2"));
+    assert_eq!(items[0]["listingId"], json!("listing-list-2"));
+    assert_eq!(items[0]["startingPrice"], json!(25.0));
+    assert_eq!(items[0]["currentHighestBid"], json!(32.0));
+    assert_eq!(items[1]["id"], json!("auction-list-1"));
+    assert_eq!(items[1]["listingId"], json!("listing-list-1"));
+    assert_eq!(items[1]["startingPrice"], json!(10.0));
+    assert_eq!(items[1]["currentHighestBid"], Value::Null);
+}
+
+#[tokio::test]
 async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

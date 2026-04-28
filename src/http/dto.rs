@@ -93,6 +93,17 @@ impl From<AuctionRecord> for AuctionResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AuctionPageResponse {
+    pub items: Vec<AuctionResponse>,
+    pub page: i64,
+    pub size: i64,
+    #[serde(rename = "totalItems")]
+    pub total_items: i64,
+    #[serde(rename = "totalPages")]
+    pub total_pages: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ErrorResponse {
     pub message: String,
 }

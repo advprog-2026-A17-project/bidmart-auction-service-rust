@@ -1,14 +1,16 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::http::dto::{
-    AuctionResponse, BidResponse, CreateAuctionRequest, ErrorResponse, PlaceBidRequest,
+    AuctionPageResponse, AuctionResponse, BidResponse, CreateAuctionRequest, ErrorResponse,
+    PlaceBidRequest,
 };
 use crate::service::auction_service::{
-    AuctionService, CreateAuctionError, GetAuctionError, ListBidsError, PlaceBidError,
+    AuctionService, CreateAuctionError, GetAuctionError, ListAuctionsError, ListBidsError,
+    PlaceBidError,
 };
 
 #[derive(Debug, Clone)]
@@ -18,10 +20,10 @@ pub struct AppState {
 
 pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
-        .route("/auctions", post(create_auction))
+        .route("/auctions", get(list_auctions).post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
-        .route("/api/v1/auctions", post(create_auction))
+        .route("/api/v1/auctions", get(list_auctions).post(create_auction))
         .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
         .route(
             "/api/v1/auctions/:auction_id/bids",
@@ -36,6 +38,20 @@ async fn create_auction(
 ) -> Result<(StatusCode, Json<AuctionResponse>), ApiError> {
     let auction = state.auction_service.create_auction(request.into()).await?;
     Ok((StatusCode::CREATED, Json(auction.into())))
+}
+
+async fn list_auctions(State(state): State<AppState>) -> Result<Json<AuctionPageResponse>, ApiError> {
+    let auctions = state.auction_service.list_auctions().await?;
+    let items: Vec<AuctionResponse> = auctions.into_iter().map(AuctionResponse::from).collect();
+    let size = items.len() as i64;
+
+    Ok(Json(AuctionPageResponse {
+        items,
+        page: 0,
+        size,
+        total_items: size,
+        total_pages: if size == 0 { 0 } else { 1 },
+    }))
 }
 
 async fn get_auction_by_id(
@@ -113,6 +129,17 @@ impl From<GetAuctionError> for ApiError {
     fn from(error: GetAuctionError) -> Self {
         match error {
             GetAuctionError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<ListAuctionsError> for ApiError {
+    fn from(error: ListAuctionsError) -> Self {
+        match error {
+            ListAuctionsError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

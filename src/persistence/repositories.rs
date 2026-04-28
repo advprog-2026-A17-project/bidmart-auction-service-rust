@@ -48,6 +48,16 @@ impl AuctionRepository {
         .fetch_optional(&self.pool)
         .await
     }
+
+    pub async fn list_all(&self) -> Result<Vec<AuctionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AuctionRecord>(
+            "SELECT id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
+             FROM auctions ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
 }
 
 #[derive(Debug, Clone)]

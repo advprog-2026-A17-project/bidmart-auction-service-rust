@@ -72,14 +72,16 @@ async fn place_bid(
     Path(auction_id): Path<String>,
     Json(request): Json<PlaceBidRequest>,
 ) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
+    let bidder_id = request
+        .bidder_id()
+        .ok_or_else(|| ApiError::bad_request("bidder_id is required"))?;
+    let bid_amount_cents = request
+        .bid_amount_cents()
+        .ok_or_else(|| ApiError::bad_request("bid_amount is required"))?;
+
     let bid = state
         .auction_service
-        .place_bid_and_persist(
-            &auction_id,
-            &request.bidder_id,
-            request.bid_amount_cents,
-            request.bid_time,
-        )
+        .place_bid_and_persist(&auction_id, bidder_id, bid_amount_cents, request.bid_time())
         .await?;
 
     Ok((StatusCode::CREATED, Json(bid.into())))
@@ -105,6 +107,13 @@ impl ApiError {
     fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
             message: message.into(),
         }
     }

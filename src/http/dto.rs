@@ -110,9 +110,30 @@ pub struct ErrorResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaceBidRequest {
-    pub bidder_id: String,
-    pub bid_amount_cents: i64,
-    pub bid_time: i64,
+    #[serde(default, alias = "bidderId")]
+    pub bidder_id: Option<String>,
+    #[serde(default)]
+    pub bid_amount_cents: Option<i64>,
+    #[serde(default, rename = "bidAmount")]
+    pub bid_amount: Option<f64>,
+    #[serde(default)]
+    pub bid_time: Option<i64>,
+}
+
+impl PlaceBidRequest {
+    pub fn bidder_id(&self) -> Option<&str> {
+        self.bidder_id.as_deref()
+    }
+
+    pub fn bid_amount_cents(&self) -> Option<i64> {
+        self.bid_amount_cents
+            .or_else(|| self.bid_amount.map(decimal_to_cents))
+    }
+
+    pub fn bid_time(&self) -> i64 {
+        self.bid_time
+            .unwrap_or_else(|| chrono::Utc::now().timestamp())
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,22 +143,43 @@ pub struct BidResponse {
     pub bidder_id: String,
     pub bid_amount_cents: i64,
     pub bid_time: i64,
+    #[serde(rename = "auctionId")]
+    pub auction_id_api: String,
+    #[serde(rename = "bidderId")]
+    pub bidder_id_api: String,
+    #[serde(rename = "bidAmount")]
+    pub bid_amount: f64,
+    #[serde(rename = "bidTime")]
+    pub bid_time_api: String,
 }
 
 impl From<BidRecord> for BidResponse {
     fn from(record: BidRecord) -> Self {
+        let auction_id = record.auction_id;
+        let bidder_id = record.bidder_id;
+        let bid_amount_cents = record.bid_amount_cents;
+        let bid_time = record.bid_time;
+
         Self {
             id: record.id,
-            auction_id: record.auction_id,
-            bidder_id: record.bidder_id,
-            bid_amount_cents: record.bid_amount_cents,
-            bid_time: record.bid_time,
+            auction_id: auction_id.clone(),
+            bidder_id: bidder_id.clone(),
+            bid_amount_cents,
+            bid_time,
+            auction_id_api: auction_id,
+            bidder_id_api: bidder_id,
+            bid_amount: cents_to_decimal(bid_amount_cents),
+            bid_time_api: unix_seconds_to_rfc3339(bid_time),
         }
     }
 }
 
 fn cents_to_decimal(cents: i64) -> f64 {
     cents as f64 / 100.0
+}
+
+fn decimal_to_cents(amount: f64) -> i64 {
+    (amount * 100.0).round() as i64
 }
 
 fn unix_seconds_to_rfc3339(seconds: i64) -> String {

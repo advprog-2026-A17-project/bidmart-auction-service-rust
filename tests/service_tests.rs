@@ -165,3 +165,173 @@ async fn test_service_get_auction_with_bids() {
     assert_eq!(id, auction_id);
     assert_eq!(bid_ids.len(), 2);
 }
+
+#[tokio::test]
+async fn test_place_bid_rejects_bid_below_starting_price() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-1".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time: now + 300,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    // Attempt to bid below starting price
+    let result = service
+        .place_bid_and_persist(&auction_id, "user-1", 500, now + 10)
+        .await;
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("minimum"));
+}
+
+#[tokio::test]
+async fn test_place_bid_rejects_bid_below_previous_plus_increment() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-1".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: Some(2000),
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time: now + 300,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    // First bid (valid)
+    service
+        .place_bid_and_persist(&auction_id, "user-1", 2000, now + 10)
+        .await
+        .expect("first bid");
+
+    // Second bid below required minimum (2000 + 200 = 2200)
+    let result = service
+        .place_bid_and_persist(&auction_id, "user-2", 2100, now + 20)
+        .await;
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("minimum"));
+}
+
+#[tokio::test]
+async fn test_place_bid_rejects_seller_bidding() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-1".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: Some(1500),
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time: now + 300,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    // Place first bid as user-1
+    service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
+        .await
+        .expect("first bid");
+
+    // Attempt to place bid as seller-1 (should fail)
+    let result = service
+        .place_bid_and_persist(&auction_id, "seller-1", 1700, now + 20)
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_place_bid_triggers_anti_sniping_extension() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+    let end_time = now + 300;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-1".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    // Bid within last 2 minutes (should extend)
+    let bid_time = end_time - 100; // 100 seconds before end (within 120-second window)
+    service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, bid_time)
+        .await
+        .expect("place bid");
+
+    // Verify auction end_time was extended
+    let updated_auction = auction_repo
+        .find_by_id(&auction_id)
+        .await
+        .expect("get auction")
+        .expect("auction exists");
+
+    // Should be extended by 120 seconds from bid_time
+    assert!(updated_auction.end_time > end_time);
+    assert_eq!(updated_auction.status, "EXTENDED");
+}

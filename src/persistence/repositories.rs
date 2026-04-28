@@ -6,7 +6,7 @@ use crate::persistence::models::{
 
 #[derive(Debug, Clone)]
 pub struct AuctionRepository {
-    pool: SqlitePool,
+    pub pool: SqlitePool,
 }
 
 impl AuctionRepository {

@@ -172,6 +172,35 @@ impl Auction {
         }
     }
 
+    pub fn with_status(
+        id: impl Into<String>,
+        listing_id: impl Into<String>,
+        seller_id: impl Into<String>,
+        starting_price: Money,
+        minimum_increment: Money,
+        reserve_price: Money,
+        start_at: UnixSeconds,
+        end_at: UnixSeconds,
+        max_extensions: u32,
+        status: AuctionStatus,
+        current_highest: Option<Bid>,
+    ) -> Self {
+        Self {
+            id: AuctionId::new(id),
+            listing_id: ListingId::new(listing_id),
+            seller_id: UserId::new(seller_id),
+            starting_price,
+            minimum_increment,
+            reserve_price,
+            start_at,
+            end_at,
+            max_extensions,
+            status,
+            current_highest,
+            extensions: 0,
+        }
+    }
+
     pub fn activate(&mut self, now: UnixSeconds) -> Result<(), AuctionStateError> {
         if self.status == AuctionStatus::Cancelled {
             return Err(AuctionStateError::Cancelled);
@@ -211,6 +240,22 @@ impl Auction {
         self.current_highest.clone()
     }
 
+    pub fn seller_id(&self) -> &UserId {
+        &self.seller_id
+    }
+
+    pub fn starting_price(&self) -> Money {
+        self.starting_price
+    }
+
+    pub fn reserve_price(&self) -> Money {
+        self.reserve_price
+    }
+
+    pub fn minimum_increment(&self) -> Money {
+        self.minimum_increment
+    }
+
     pub fn place_bid(
         &mut self,
         bidder_id: UserId,
@@ -230,6 +275,11 @@ impl Auction {
         if now >= self.end_at {
             self.status = AuctionStatus::Ended;
             return Err(BidError::AuctionEnded { end_at: self.end_at });
+        }
+
+        // Seller cannot bid on their own auction
+        if bidder_id == self.seller_id {
+            return Err(BidError::SelfBiddingNotAllowed { bidder_id });
         }
 
         if let Some(current) = &self.current_highest {

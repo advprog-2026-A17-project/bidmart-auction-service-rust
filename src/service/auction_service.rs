@@ -1,4 +1,4 @@
-use crate::auction::BidError;
+use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
 use crate::persistence::models::{
     AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
@@ -86,15 +86,26 @@ impl AuctionService {
         bid_time: i64,
     ) -> Result<BidRecord, PlaceBidError> {
         // Fetch auction
-        let _auction_record = self
+        let auction_record = self
             .auction_repo
             .find_by_id(auction_id)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
             .ok_or(PlaceBidError::AuctionNotFound)?;
 
-        // In a real implementation, would validate against domain logic here
-        // For now, just persist the bid
+        // Convert to domain object with current highest bid
+        let mut auction = self
+            .record_to_domain_with_bid(&auction_record)
+            .await
+            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+
+        // Place bid using domain logic
+        let bid_result = auction.place_bid(
+            UserId::new(bidder_id),
+            Money::from_cents(bid_amount_cents as u64),
+            UnixSeconds::new(bid_time as u64),
+        )
+        .map_err(PlaceBidError::BidError)?;
 
         // Persist the bid
         let bid_record = NewBidRecord {
@@ -110,12 +121,81 @@ impl AuctionService {
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
+        // Update auction if it was extended or if current highest bid changed
+        let new_highest_cents = bid_result.new_highest.amount.cents() as i64;
+        let mut updated_record = auction_record.clone();
+        updated_record.current_highest_bid_cents = Some(new_highest_cents);
+        updated_record.end_time = bid_result.new_end_at.value() as i64;
+        updated_record.status = self.status_to_string(auction.status());
+        updated_record.updated_at = bid_time;
+
+        sqlx::query(
+            "UPDATE auctions SET current_highest_bid_cents = ?, end_time = ?, status = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(updated_record.current_highest_bid_cents)
+        .bind(updated_record.end_time)
+        .bind(&updated_record.status)
+        .bind(updated_record.updated_at)
+        .bind(auction_id)
+        .execute(&self.auction_repo.pool)
+        .await
+        .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+
         // Publish event via outbox
         self.publish_bid_placed_event(auction_id, bidder_id, bid_amount_cents)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
         Ok(inserted_bid)
+    }
+
+    async fn record_to_domain_with_bid(
+        &self,
+        record: &AuctionRecord,
+    ) -> Result<Auction, sqlx::Error> {
+        let status = match record.status.as_str() {
+            "SCHEDULED" => crate::auction::AuctionStatus::Scheduled,
+            "ACTIVE" => crate::auction::AuctionStatus::Active,
+            "EXTENDED" => crate::auction::AuctionStatus::Extended,
+            "ENDED" => crate::auction::AuctionStatus::Ended,
+            "CANCELLED" => crate::auction::AuctionStatus::Cancelled,
+            _ => crate::auction::AuctionStatus::Scheduled,
+        };
+
+        // Fetch current highest bid from database
+        let current_highest = self
+            .bid_repo
+            .find_winning_bid(&record.id)
+            .await?
+            .map(|bid_record| crate::auction::Bid {
+                bidder_id: UserId::new(bid_record.bidder_id),
+                amount: Money::from_cents(bid_record.bid_amount_cents as u64),
+                placed_at: UnixSeconds::new(bid_record.bid_time as u64),
+            });
+
+        Ok(Auction::with_status(
+            &record.id,
+            &record.listing_id,
+            &record.seller_id,
+            Money::from_cents(record.starting_price_cents as u64),
+            Money::from_cents(record.minimum_increment_cents as u64),
+            Money::from_cents(record.reserve_price_cents as u64),
+            UnixSeconds::new(record.start_time as u64),
+            UnixSeconds::new(record.end_time as u64),
+            3, // max_extensions - unlimited per spec but set reasonable default
+            status,
+            current_highest,
+        ))
+    }
+
+    fn status_to_string(&self, status: crate::auction::AuctionStatus) -> String {
+        match status {
+            crate::auction::AuctionStatus::Scheduled => "SCHEDULED".to_string(),
+            crate::auction::AuctionStatus::Active => "ACTIVE".to_string(),
+            crate::auction::AuctionStatus::Extended => "EXTENDED".to_string(),
+            crate::auction::AuctionStatus::Ended => "ENDED".to_string(),
+            crate::auction::AuctionStatus::Cancelled => "CANCELLED".to_string(),
+        }
     }
 
     /// Get auction with bids

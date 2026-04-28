@@ -5,6 +5,7 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tower::ServiceExt;
 
 use bidmart_auction_service_rust::http::router::create_router;
+use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
     AuctionRepository, BidRepository, OutboxRepository,
 };
@@ -101,4 +102,64 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(persisted.reserve_price_cents, 5000);
     assert_eq!(persisted.minimum_increment_cents, 200);
     assert_eq!(persisted.status, "ACTIVE");
+}
+
+#[tokio::test]
+async fn get_auction_by_id_returns_auction_response() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-2".to_string(),
+        seller_id: "seller-2".to_string(),
+        starting_price_cents: 2500,
+        reserve_price_cents: 4000,
+        current_highest_bid_cents: Some(3000),
+        minimum_increment_cents: 250,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/auctions/{auction_id}"))
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+
+    assert_eq!(response_body["id"], json!(auction_id));
+    assert_eq!(response_body["listing_id"], json!("listing-2"));
+    assert_eq!(response_body["seller_id"], json!("seller-2"));
+    assert_eq!(response_body["starting_price_cents"], json!(2500));
+    assert_eq!(response_body["reserve_price_cents"], json!(4000));
+    assert_eq!(response_body["current_highest_bid_cents"], json!(3000));
+    assert_eq!(response_body["minimum_increment_cents"], json!(250));
+    assert_eq!(response_body["status"], json!("ACTIVE"));
+    assert_eq!(response_body["start_time"], json!(now - 120));
+    assert_eq!(response_body["end_time"], json!(now + 900));
 }

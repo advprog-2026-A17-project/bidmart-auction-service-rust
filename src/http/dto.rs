@@ -40,21 +40,54 @@ pub struct AuctionResponse {
     pub status: String,
     pub start_time: i64,
     pub end_time: i64,
+    #[serde(rename = "listingId")]
+    pub listing_id_api: String,
+    #[serde(rename = "sellerId")]
+    pub seller_id_api: String,
+    #[serde(rename = "startingPrice")]
+    pub starting_price: f64,
+    #[serde(rename = "reservePrice")]
+    pub reserve_price: f64,
+    #[serde(rename = "currentHighestBid")]
+    pub current_highest_bid: Option<f64>,
+    #[serde(rename = "minimumIncrement")]
+    pub minimum_increment: f64,
+    #[serde(rename = "startTime")]
+    pub start_time_api: String,
+    #[serde(rename = "endTime")]
+    pub end_time_api: String,
 }
 
 impl From<AuctionRecord> for AuctionResponse {
     fn from(record: AuctionRecord) -> Self {
+        let listing_id = record.listing_id;
+        let seller_id = record.seller_id;
+        let starting_price_cents = record.starting_price_cents;
+        let reserve_price_cents = record.reserve_price_cents;
+        let current_highest_bid_cents = record.current_highest_bid_cents;
+        let minimum_increment_cents = record.minimum_increment_cents;
+        let start_time = record.start_time;
+        let end_time = record.end_time;
+
         Self {
             id: record.id,
-            listing_id: record.listing_id,
-            seller_id: record.seller_id,
-            starting_price_cents: record.starting_price_cents,
-            reserve_price_cents: record.reserve_price_cents,
-            current_highest_bid_cents: record.current_highest_bid_cents,
-            minimum_increment_cents: record.minimum_increment_cents,
+            listing_id: listing_id.clone(),
+            seller_id: seller_id.clone(),
+            starting_price_cents,
+            reserve_price_cents,
+            current_highest_bid_cents,
+            minimum_increment_cents,
             status: record.status,
-            start_time: record.start_time,
-            end_time: record.end_time,
+            start_time,
+            end_time,
+            listing_id_api: listing_id,
+            seller_id_api: seller_id,
+            starting_price: cents_to_decimal(starting_price_cents),
+            reserve_price: cents_to_decimal(reserve_price_cents),
+            current_highest_bid: current_highest_bid_cents.map(cents_to_decimal),
+            minimum_increment: cents_to_decimal(minimum_increment_cents),
+            start_time_api: unix_seconds_to_rfc3339(start_time),
+            end_time_api: unix_seconds_to_rfc3339(end_time),
         }
     }
 }
@@ -90,4 +123,14 @@ impl From<BidRecord> for BidResponse {
             bid_time: record.bid_time,
         }
     }
+}
+
+fn cents_to_decimal(cents: i64) -> f64 {
+    cents as f64 / 100.0
+}
+
+fn unix_seconds_to_rfc3339(seconds: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
+        .map(|datetime| datetime.to_rfc3339())
+        .unwrap_or_else(|| seconds.to_string())
 }

@@ -21,6 +21,12 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         .route("/auctions", post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
+        .route("/api/v1/auctions", post(create_auction))
+        .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
+        .route(
+            "/api/v1/auctions/:auction_id/bids",
+            get(list_bids).post(place_bid),
+        )
         .with_state(AppState { auction_service })
 }
 

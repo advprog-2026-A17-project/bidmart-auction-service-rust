@@ -1,15 +1,29 @@
+use std::sync::Arc;
+
 use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
+use crate::client::{WalletClient, HoldFundsRequest};
 use crate::persistence::models::{
     AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use thiserror::Error;
 
-#[derive(Debug, Clone)]
 pub struct AuctionService {
     auction_repo: AuctionRepository,
     bid_repo: BidRepository,
     outbox_repo: OutboxRepository,
+    wallet_client: Option<Arc<dyn WalletClient>>,
+}
+
+impl std::fmt::Debug for AuctionService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuctionService")
+            .field("auction_repo", &"<AuctionRepository>")
+            .field("bid_repo", &"<BidRepository>")
+            .field("outbox_repo", &"<OutboxRepository>")
+            .field("wallet_client", &"<WalletClient>")
+            .finish()
+    }
 }
 
 impl AuctionService {
@@ -22,6 +36,21 @@ impl AuctionService {
             auction_repo,
             bid_repo,
             outbox_repo,
+            wallet_client: None,
+        }
+    }
+
+    pub fn new_with_wallet(
+        auction_repo: AuctionRepository,
+        bid_repo: BidRepository,
+        outbox_repo: OutboxRepository,
+        wallet_client: Arc<dyn WalletClient>,
+    ) -> Self {
+        Self {
+            auction_repo,
+            bid_repo,
+            outbox_repo,
+            wallet_client: Some(wallet_client),
         }
     }
 
@@ -106,6 +135,22 @@ impl AuctionService {
             UnixSeconds::new(bid_time as u64),
         )
         .map_err(PlaceBidError::BidError)?;
+
+        // Hold funds from wallet (blocking operation, part of critical path)
+        let _hold_id = if let Some(wallet_client) = &self.wallet_client {
+            let hold_request = HoldFundsRequest {
+                user_id: bidder_id.to_string(),
+                amount_cents: bid_amount_cents,
+                reason: format!("Bid on auction {}", auction_id),
+            };
+            let hold_response = wallet_client
+                .hold_funds(hold_request)
+                .await
+                .map_err(|e| PlaceBidError::WalletError(e.to_string()))?;
+            Some(hold_response.hold_id)
+        } else {
+            None
+        };
 
         // Persist the bid
         let bid_record = NewBidRecord {
@@ -330,6 +375,7 @@ pub enum ListBidsError {
 pub enum PlaceBidError {
     AuctionNotFound,
     BidError(BidError),
+    WalletError(String),
     DatabaseError(String),
 }
 
@@ -338,6 +384,7 @@ impl std::fmt::Display for PlaceBidError {
         match self {
             PlaceBidError::AuctionNotFound => write!(f, "Auction not found"),
             PlaceBidError::BidError(e) => write!(f, "{:?}", e),
+            PlaceBidError::WalletError(e) => write!(f, "Wallet error: {}", e),
             PlaceBidError::DatabaseError(e) => write!(f, "Database error: {}", e),
         }
     }

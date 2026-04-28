@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -15,10 +17,13 @@ use crate::service::auction_service::{
 
 #[derive(Debug, Clone)]
 pub struct AppState {
-    auction_service: AuctionService,
+    auction_service: Arc<AuctionService>,
 }
 
 pub fn create_router(auction_service: AuctionService) -> Router {
+    let state = AppState {
+        auction_service: Arc::new(auction_service),
+    };
     Router::new()
         .route("/auctions", get(list_auctions).post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
@@ -29,7 +34,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
             "/api/v1/auctions/:auction_id/bids",
             get(list_bids).post(place_bid),
         )
-        .with_state(AppState { auction_service })
+        .with_state(state)
 }
 
 async fn create_auction(
@@ -167,6 +172,10 @@ impl From<PlaceBidError> for ApiError {
             PlaceBidError::BidError(error) => Self {
                 status: StatusCode::BAD_REQUEST,
                 message: error.to_string(),
+            },
+            PlaceBidError::WalletError(message) => Self {
+                status: StatusCode::PAYMENT_REQUIRED,
+                message,
             },
             PlaceBidError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,

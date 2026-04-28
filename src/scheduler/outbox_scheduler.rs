@@ -1,6 +1,8 @@
 use std::future::Future;
+use std::time::Duration;
 
 use thiserror::Error;
+use tokio::task::JoinHandle;
 
 use crate::persistence::models::OutboxEventRecord;
 use crate::persistence::repositories::OutboxRepository;
@@ -53,6 +55,29 @@ impl OutboxScheduler {
         }
 
         Ok(report)
+    }
+
+    pub fn spawn_polling<F, Fut>(
+        &self,
+        interval: Duration,
+        limit: i64,
+        publish: F,
+    ) -> JoinHandle<()>
+    where
+        F: Fn(OutboxEventRecord) -> Fut + Clone + Send + 'static,
+        Fut: Future<Output = Result<(), OutboxPublishError>> + Send + 'static,
+    {
+        let scheduler = self.clone();
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+
+            loop {
+                ticker.tick().await;
+                let publish = publish.clone();
+                let _ = scheduler.publish_pending(limit, publish).await;
+            }
+        })
     }
 }
 

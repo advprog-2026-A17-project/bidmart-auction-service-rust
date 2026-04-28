@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::client::http_service_client::{HttpServiceClient, HttpServiceClientError};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HoldFundsRequest {
     pub user_id: String,
@@ -34,21 +36,15 @@ pub trait WalletClient: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct HttpWalletClient {
-    base_url: url::Url,
+    client: HttpServiceClient,
 }
 
 impl HttpWalletClient {
     pub fn new(base_url: impl AsRef<str>) -> Result<Self, WalletClientError> {
-        let base_url = url::Url::parse(base_url.as_ref())
-            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
+        let client = HttpServiceClient::new(base_url, "wallet")
+            .map_err(WalletClientError::from_http_error)?;
 
-        if base_url.scheme() != "http" {
-            return Err(WalletClientError::ServiceError(
-                "only http wallet URLs are supported".to_string(),
-            ));
-        }
-
-        Ok(Self { base_url })
+        Ok(Self { client })
     }
 
     async fn post_funds(
@@ -58,84 +54,27 @@ impl HttpWalletClient {
     ) -> Result<(), WalletClientError> {
         let body = serde_json::to_vec(&request)
             .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
-        let (status, response_body) = self.post_json(path.to_string(), body).await?;
+        let response = self
+            .client
+            .post_json(path.to_string(), body)
+            .await
+            .map_err(WalletClientError::from_http_error)?;
 
-        if status.is_success() {
+        if response.status.is_success() {
             return Ok(());
         }
 
-        let message = String::from_utf8_lossy(&response_body).to_string();
-        if status == hyper::StatusCode::BAD_REQUEST || status == hyper::StatusCode::PAYMENT_REQUIRED
+        let message = String::from_utf8_lossy(&response.body).to_string();
+        if response.status == hyper::StatusCode::BAD_REQUEST
+            || response.status == hyper::StatusCode::PAYMENT_REQUIRED
         {
             return Err(WalletClientError::InsufficientBalance(message));
         }
 
         Err(WalletClientError::ServiceError(format!(
-            "wallet service returned {status}: {message}"
+            "wallet service returned {}: {message}",
+            response.status
         )))
-    }
-
-    async fn post_json(
-        &self,
-        path: String,
-        body: Vec<u8>,
-    ) -> Result<(hyper::StatusCode, Vec<u8>), WalletClientError> {
-        use http_body_util::{BodyExt, Full};
-        use hyper::body::Bytes;
-        use hyper::client::conn::http1;
-        use hyper::{Method, Request};
-        use hyper_util::rt::TokioIo;
-        use tokio::net::TcpStream;
-
-        let host = self
-            .base_url
-            .host_str()
-            .ok_or_else(|| WalletClientError::ServiceError("wallet URL is missing host".to_string()))?;
-        let port = self
-            .base_url
-            .port_or_known_default()
-            .ok_or_else(|| WalletClientError::ServiceError("wallet URL is missing port".to_string()))?;
-        let stream = TcpStream::connect((host, port))
-            .await
-            .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
-        let io = TokioIo::new(stream);
-        let (mut sender, connection) = http1::handshake(io)
-            .await
-            .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
-
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
-
-        let host_header = match self.base_url.port() {
-            Some(port) => format!("{host}:{port}"),
-            None => host.to_string(),
-        };
-        let content_length = body.len().to_string();
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri(path)
-            .header("host", host_header)
-            .header("accept", "application/json")
-            .header("content-type", "application/json")
-            .header("content-length", content_length)
-            .body(Full::new(Bytes::from(body)))
-            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
-
-        let response = sender
-            .send_request(request)
-            .await
-            .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
-        let status = response.status();
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .map_err(|error| WalletClientError::NetworkError(error.to_string()))?
-            .to_bytes()
-            .to_vec();
-
-        Ok((status, body))
     }
 }
 
@@ -214,4 +153,14 @@ fn parse_wallet_hold_id(hold_id: &str) -> Result<(String, i64), WalletClientErro
 
 fn cents_to_decimal(cents: i64) -> f64 {
     cents as f64 / 100.0
+}
+
+impl WalletClientError {
+    fn from_http_error(error: HttpServiceClientError) -> Self {
+        match error {
+            HttpServiceClientError::Configuration(message) => Self::ServiceError(message),
+            HttpServiceClientError::Network(message) => Self::NetworkError(message),
+            HttpServiceClientError::Request(message) => Self::ServiceError(message),
+        }
+    }
 }

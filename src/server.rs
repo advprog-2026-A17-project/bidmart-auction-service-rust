@@ -5,7 +5,10 @@ use std::env;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::client::{CatalogClient, CatalogClientError, HttpCatalogClient};
+use crate::client::{
+    CatalogClient, CatalogClientError, HttpCatalogClient, HttpWalletClient, WalletClient,
+    WalletClientError,
+};
 use crate::http::router::create_router;
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use crate::service::auction_service::AuctionService;
@@ -17,12 +20,16 @@ pub fn build_router(pool: SqlitePool) -> Router {
     let catalog_url = env::var("CATALOGUE_SERVICE_URL").ok();
     let catalog_client = catalog_client_from_url(catalog_url.as_deref())
         .expect("CATALOGUE_SERVICE_URL must be a valid http URL");
-    let auction_service = match catalog_client {
-        Some(catalog_client) => {
-            AuctionService::new_with_catalog(auction_repo, bid_repo, outbox_repo, catalog_client)
-        }
-        None => AuctionService::new(auction_repo, bid_repo, outbox_repo),
-    };
+    let wallet_url = env::var("WALLET_SERVICE_URL").ok();
+    let wallet_client =
+        wallet_client_from_url(wallet_url.as_deref()).expect("WALLET_SERVICE_URL must be a valid http URL");
+    let auction_service = AuctionService::new_with_clients(
+        auction_repo,
+        bid_repo,
+        outbox_repo,
+        wallet_client,
+        catalog_client,
+    );
 
     create_router(auction_service)
 }
@@ -35,6 +42,16 @@ pub fn catalog_client_from_url(
     };
 
     Ok(Some(Arc::new(HttpCatalogClient::new(base_url)?)))
+}
+
+pub fn wallet_client_from_url(
+    base_url: Option<&str>,
+) -> Result<Option<Arc<dyn WalletClient>>, WalletClientError> {
+    let Some(base_url) = base_url.filter(|value| !value.trim().is_empty()) else {
+        return Ok(None);
+    };
+
+    Ok(Some(Arc::new(HttpWalletClient::new(base_url)?)))
 }
 
 pub async fn connect_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {

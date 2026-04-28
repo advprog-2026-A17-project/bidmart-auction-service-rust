@@ -163,3 +163,83 @@ async fn get_auction_by_id_returns_auction_response() {
     assert_eq!(response_body["start_time"], json!(now - 120));
     assert_eq!(response_body["end_time"], json!(now + 900));
 }
+
+#[tokio::test]
+async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-3".to_string(),
+        seller_id: "seller-3".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+
+    let request_body = json!({
+        "bidder_id": "bidder-1",
+        "bid_amount_cents": 1500,
+        "bid_time": now + 30
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/auctions/{auction_id}/bids"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+
+    let bid_id = response_body["id"]
+        .as_str()
+        .expect("response has bid id")
+        .to_string();
+    assert!(!bid_id.is_empty());
+    assert_eq!(response_body["auction_id"], json!(auction_id));
+    assert_eq!(response_body["bidder_id"], json!("bidder-1"));
+    assert_eq!(response_body["bid_amount_cents"], json!(1500));
+    assert_eq!(response_body["bid_time"], json!(now + 30));
+
+    let bids = bid_repo
+        .list_by_auction_id_desc(&auction_id)
+        .await
+        .expect("list bids");
+    assert_eq!(bids.len(), 1);
+    assert_eq!(bids[0].id, bid_id);
+    assert_eq!(bids[0].bidder_id, "bidder-1");
+    assert_eq!(bids[0].bid_amount_cents, 1500);
+
+    let events = outbox_repo.list_pending(10).await.expect("list outbox");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].aggregate_id, auction_id);
+    assert_eq!(events[0].event_type, "BidPlaced");
+}

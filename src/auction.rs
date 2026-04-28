@@ -1,5 +1,7 @@
 use std::ops::{Add, AddAssign};
 
+use thiserror::Error;
+
 const ANTI_SNIPING_WINDOW_SECS: u64 = 120;
 const ANTI_SNIPING_EXTENSION_SECS: u64 = 120;
 
@@ -93,10 +95,13 @@ pub enum AuctionStatus {
     Ended,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BidError {
+    #[error("auction has not started yet")]
     AuctionNotStarted { start_at: UnixSeconds },
+    #[error("auction already ended")]
     AuctionEnded { end_at: UnixSeconds },
+    #[error("bid amount below minimum required")]
     BidTooLow { minimum: Money },
 }
 

@@ -219,6 +219,11 @@ impl Auction {
     }
 
     fn maybe_extend(&mut self, now: UnixSeconds) -> bool {
+        let total_duration = self.start_at.seconds_until(self.end_at);
+        if total_duration <= ANTI_SNIPING_WINDOW_SECS {
+            return false;
+        }
+
         let remaining = now.seconds_until(self.end_at);
         if remaining <= ANTI_SNIPING_WINDOW_SECS {
             self.end_at = self.end_at.add_secs(ANTI_SNIPING_EXTENSION_SECS);

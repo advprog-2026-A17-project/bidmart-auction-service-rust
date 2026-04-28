@@ -93,16 +93,31 @@ pub enum AuctionStatus {
     Active,
     Extended,
     Ended,
+    Cancelled,
+}
+
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum AuctionStateError {
+    #[error("auction cannot start before start time")]
+    TooEarly { start_at: UnixSeconds },
+    #[error("auction already ended")]
+    AlreadyEnded { end_at: UnixSeconds },
+    #[error("auction is cancelled")]
+    Cancelled,
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BidError {
+    #[error("auction is not active")]
+    AuctionNotActive { status: AuctionStatus },
     #[error("auction has not started yet")]
     AuctionNotStarted { start_at: UnixSeconds },
     #[error("auction already ended")]
     AuctionEnded { end_at: UnixSeconds },
     #[error("bid amount below minimum required")]
     BidTooLow { minimum: Money },
+    #[error("self bidding is not allowed")]
+    SelfBiddingNotAllowed { bidder_id: UserId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +138,7 @@ pub struct Auction {
     reserve_price: Money,
     start_at: UnixSeconds,
     end_at: UnixSeconds,
+    max_extensions: u32,
     status: AuctionStatus,
     current_highest: Option<Bid>,
     extensions: u32,
@@ -138,6 +154,7 @@ impl Auction {
         reserve_price: Money,
         start_at: UnixSeconds,
         end_at: UnixSeconds,
+        max_extensions: u32,
     ) -> Self {
         Self {
             id: AuctionId::new(id),
@@ -148,10 +165,38 @@ impl Auction {
             reserve_price,
             start_at,
             end_at,
+            max_extensions,
             status: AuctionStatus::Scheduled,
             current_highest: None,
             extensions: 0,
         }
+    }
+
+    pub fn activate(&mut self, now: UnixSeconds) -> Result<(), AuctionStateError> {
+        if self.status == AuctionStatus::Cancelled {
+            return Err(AuctionStateError::Cancelled);
+        }
+
+        if now < self.start_at {
+            return Err(AuctionStateError::TooEarly {
+                start_at: self.start_at,
+            });
+        }
+
+        if now >= self.end_at || self.status == AuctionStatus::Ended {
+            self.status = AuctionStatus::Ended;
+            return Err(AuctionStateError::AlreadyEnded { end_at: self.end_at });
+        }
+
+        if self.status == AuctionStatus::Scheduled {
+            self.status = AuctionStatus::Active;
+        }
+
+        Ok(())
+    }
+
+    pub fn cancel(&mut self) {
+        self.status = AuctionStatus::Cancelled;
     }
 
     pub fn status(&self) -> AuctionStatus {
@@ -172,6 +217,10 @@ impl Auction {
         amount: Money,
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
+        if self.status != AuctionStatus::Active && self.status != AuctionStatus::Extended {
+            return Err(BidError::AuctionNotActive { status: self.status });
+        }
+
         if now < self.start_at {
             return Err(BidError::AuctionNotStarted {
                 start_at: self.start_at,
@@ -179,11 +228,14 @@ impl Auction {
         }
 
         if now >= self.end_at {
+            self.status = AuctionStatus::Ended;
             return Err(BidError::AuctionEnded { end_at: self.end_at });
         }
 
-        if self.status == AuctionStatus::Scheduled {
-            self.status = AuctionStatus::Active;
+        if let Some(current) = &self.current_highest {
+            if current.bidder_id == bidder_id {
+                return Err(BidError::SelfBiddingNotAllowed { bidder_id });
+            }
         }
 
         let minimum_required = self.minimum_required_bid();
@@ -219,14 +271,13 @@ impl Auction {
     }
 
     fn maybe_extend(&mut self, now: UnixSeconds) -> bool {
-        let total_duration = self.start_at.seconds_until(self.end_at);
-        if total_duration <= ANTI_SNIPING_WINDOW_SECS {
+        if self.extensions >= self.max_extensions {
             return false;
         }
 
         let remaining = now.seconds_until(self.end_at);
         if remaining <= ANTI_SNIPING_WINDOW_SECS {
-            self.end_at = self.end_at.add_secs(ANTI_SNIPING_EXTENSION_SECS);
+            self.end_at = now.add_secs(ANTI_SNIPING_EXTENSION_SECS);
             self.extensions += 1;
             self.status = AuctionStatus::Extended;
             return true;

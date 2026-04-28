@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
-use crate::client::{CatalogClient, HoldFundsRequest, WalletClient};
+use crate::client::{CatalogClient, HoldFundsRequest, ListingSummary, WalletClient};
 use crate::persistence::models::{
     AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
@@ -104,20 +104,13 @@ impl AuctionService {
         &self,
         command: &CreateAuctionCommand,
     ) -> Result<(), CreateAuctionError> {
-        let Some(catalog_client) = &self.catalog_client else {
+        let Some(listing) = self
+            .require_active_listing(&command.listing_id)
+            .await
+            .map_err(CreateAuctionError::InvalidInput)?
+        else {
             return Ok(());
         };
-
-        let listing = catalog_client
-            .get_listing_summary(&command.listing_id)
-            .await
-            .map_err(|error| CreateAuctionError::InvalidInput(error.to_string()))?;
-
-        if !listing.status.eq_ignore_ascii_case("ACTIVE") {
-            return Err(CreateAuctionError::InvalidInput(
-                "Listing is not active".to_string(),
-            ));
-        }
 
         if listing.seller_id != command.seller_id {
             return Err(CreateAuctionError::InvalidInput(
@@ -282,22 +275,31 @@ impl AuctionService {
     }
 
     async fn validate_listing_for_bid(&self, listing_id: &str) -> Result<(), PlaceBidError> {
+        self.require_active_listing(listing_id)
+            .await
+            .map_err(PlaceBidError::CatalogError)?;
+
+        Ok(())
+    }
+
+    async fn require_active_listing(
+        &self,
+        listing_id: &str,
+    ) -> Result<Option<ListingSummary>, String> {
         let Some(catalog_client) = &self.catalog_client else {
-            return Ok(());
+            return Ok(None);
         };
 
         let listing = catalog_client
             .get_listing_summary(listing_id)
             .await
-            .map_err(|error| PlaceBidError::CatalogError(error.to_string()))?;
+            .map_err(|error| error.to_string())?;
 
         if !listing.status.eq_ignore_ascii_case("ACTIVE") {
-            return Err(PlaceBidError::CatalogError(
-                "Listing is not active".to_string(),
-            ));
+            return Err("Listing is not active".to_string());
         }
 
-        Ok(())
+        Ok(Some(listing))
     }
 
     fn status_to_string(&self, status: crate::auction::AuctionStatus) -> String {

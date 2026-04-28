@@ -16,7 +16,9 @@ fn docker_compose_routes_gateway_auction_traffic_to_rust_service() {
         .next()
         .expect("read auction service block");
     assert!(auction_service_block.contains("CATALOGUE_SERVICE_URL: http://catalogue-service:8081"));
+    assert!(auction_service_block.contains("WALLET_SERVICE_URL: http://wallet-service:8083"));
     assert!(auction_service_block.contains("- catalogue-service"));
+    assert!(auction_service_block.contains("- wallet-service"));
 }
 
 #[test]

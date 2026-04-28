@@ -3,7 +3,9 @@ use axum::http::{Method, Request, StatusCode};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tower::ServiceExt;
 
-use bidmart_auction_service_rust::server::{build_router, catalog_client_from_url};
+use bidmart_auction_service_rust::server::{
+    build_router, catalog_client_from_url, wallet_client_from_url,
+};
 
 async fn setup_test_db() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
@@ -61,6 +63,21 @@ fn catalog_client_from_url_builds_http_catalog_client_when_configured() {
 #[test]
 fn catalog_client_from_url_skips_catalog_client_when_unconfigured() {
     let client = catalog_client_from_url(None).expect("build catalog client");
+
+    assert!(client.is_none());
+}
+
+#[test]
+fn wallet_client_from_url_builds_http_wallet_client_when_configured() {
+    let client =
+        wallet_client_from_url(Some("http://wallet-service:8083")).expect("build wallet client");
+
+    assert!(client.is_some());
+}
+
+#[test]
+fn wallet_client_from_url_skips_wallet_client_when_unconfigured() {
+    let client = wallet_client_from_url(None).expect("build wallet client");
 
     assert!(client.is_none());
 }

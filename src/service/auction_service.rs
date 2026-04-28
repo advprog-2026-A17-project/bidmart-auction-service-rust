@@ -63,6 +63,13 @@ impl AuctionService {
             .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))
     }
 
+    pub async fn list_bids(&self, auction_id: &str) -> Result<Vec<BidRecord>, ListBidsError> {
+        self.bid_repo
+            .list_by_auction_id_desc(auction_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))
+    }
+
     /// Place a bid on an auction
     pub async fn place_bid_and_persist(
         &self,
@@ -216,6 +223,12 @@ pub enum CreateAuctionError {
 
 #[derive(Debug, Error)]
 pub enum GetAuctionError {
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+}
+
+#[derive(Debug, Error)]
+pub enum ListBidsError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 }

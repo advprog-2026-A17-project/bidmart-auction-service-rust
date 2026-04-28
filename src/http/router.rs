@@ -8,7 +8,7 @@ use crate::http::dto::{
     AuctionResponse, BidResponse, CreateAuctionRequest, ErrorResponse, PlaceBidRequest,
 };
 use crate::service::auction_service::{
-    AuctionService, CreateAuctionError, GetAuctionError, PlaceBidError,
+    AuctionService, CreateAuctionError, GetAuctionError, ListBidsError, PlaceBidError,
 };
 
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/auctions", post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
-        .route("/auctions/:auction_id/bids", post(place_bid))
+        .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
         .with_state(AppState { auction_service })
 }
 
@@ -61,6 +61,16 @@ async fn place_bid(
         .await?;
 
     Ok((StatusCode::CREATED, Json(bid.into())))
+}
+
+async fn list_bids(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+) -> Result<Json<Vec<BidResponse>>, ApiError> {
+    let bids = state.auction_service.list_bids(&auction_id).await?;
+    let response = bids.into_iter().map(BidResponse::from).collect();
+
+    Ok(Json(response))
 }
 
 #[derive(Debug)]
@@ -116,6 +126,17 @@ impl From<PlaceBidError> for ApiError {
                 message: error.to_string(),
             },
             PlaceBidError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<ListBidsError> for ApiError {
+    fn from(error: ListBidsError) -> Self {
+        match error {
+            ListBidsError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

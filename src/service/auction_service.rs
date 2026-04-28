@@ -1,6 +1,9 @@
 use crate::auction::BidError;
+use crate::persistence::models::{
+    AuctionRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+};
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
-use crate::persistence::models::{NewBidRecord, NewOutboxEventRecord};
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct AuctionService {
@@ -20,6 +23,34 @@ impl AuctionService {
             bid_repo,
             outbox_repo,
         }
+    }
+
+    pub async fn create_auction(
+        &self,
+        command: CreateAuctionCommand,
+    ) -> Result<AuctionRecord, CreateAuctionError> {
+        command.validate()?;
+
+        let now = chrono::Utc::now().timestamp();
+        let auction = NewAuctionRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            listing_id: command.listing_id,
+            seller_id: command.seller_id,
+            starting_price_cents: command.starting_price_cents,
+            reserve_price_cents: command.reserve_price_cents,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: command.minimum_increment_cents,
+            status: initial_status(command.start_time, now),
+            start_time: command.start_time,
+            end_time: command.end_time,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.auction_repo
+            .insert(&auction)
+            .await
+            .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))
     }
 
     /// Place a bid on an auction
@@ -100,6 +131,76 @@ impl AuctionService {
         self.outbox_repo.insert(&event).await?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateAuctionCommand {
+    pub listing_id: String,
+    pub seller_id: String,
+    pub starting_price_cents: i64,
+    pub reserve_price_cents: i64,
+    pub minimum_increment_cents: i64,
+    pub start_time: i64,
+    pub end_time: i64,
+}
+
+impl CreateAuctionCommand {
+    fn validate(&self) -> Result<(), CreateAuctionError> {
+        if self.listing_id.trim().is_empty() {
+            return Err(CreateAuctionError::InvalidInput(
+                "listing_id is required".to_string(),
+            ));
+        }
+
+        if self.seller_id.trim().is_empty() {
+            return Err(CreateAuctionError::InvalidInput(
+                "seller_id is required".to_string(),
+            ));
+        }
+
+        if self.starting_price_cents <= 0 {
+            return Err(CreateAuctionError::InvalidInput(
+                "starting_price_cents must be greater than zero".to_string(),
+            ));
+        }
+
+        if self.minimum_increment_cents <= 0 {
+            return Err(CreateAuctionError::InvalidInput(
+                "minimum_increment_cents must be greater than zero".to_string(),
+            ));
+        }
+
+        if self.reserve_price_cents < self.starting_price_cents {
+            return Err(CreateAuctionError::InvalidInput(
+                "reserve_price_cents must be greater than or equal to starting_price_cents"
+                    .to_string(),
+            ));
+        }
+
+        if self.end_time <= self.start_time {
+            return Err(CreateAuctionError::InvalidInput(
+                "end_time must be after start_time".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+fn initial_status(start_time: i64, now: i64) -> String {
+    if start_time > now {
+        "SCHEDULED".to_string()
+    } else {
+        "ACTIVE".to_string()
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CreateAuctionError {
+    #[error("{0}")]
+    InvalidInput(String),
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 #[derive(Debug)]

@@ -1,6 +1,6 @@
 use crate::auction::BidError;
 use crate::persistence::models::{
-    AuctionRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+    AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use thiserror::Error;
@@ -70,7 +70,7 @@ impl AuctionService {
         bidder_id: &str,
         bid_amount_cents: i64,
         bid_time: i64,
-    ) -> Result<(), PlaceBidError> {
+    ) -> Result<BidRecord, PlaceBidError> {
         // Fetch auction
         let _auction_record = self
             .auction_repo
@@ -90,7 +90,8 @@ impl AuctionService {
             bid_amount_cents,
             bid_time,
         };
-        self.bid_repo
+        let inserted_bid = self
+            .bid_repo
             .insert(&bid_record)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
@@ -100,7 +101,7 @@ impl AuctionService {
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
-        Ok(())
+        Ok(inserted_bid)
     }
 
     /// Get auction with bids

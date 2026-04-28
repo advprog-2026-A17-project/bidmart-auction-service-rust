@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::persistence::models::AuctionRecord;
+use crate::persistence::models::{AuctionRecord, BidRecord};
 use crate::service::auction_service::CreateAuctionCommand;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,4 +62,32 @@ impl From<AuctionRecord> for AuctionResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorResponse {
     pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlaceBidRequest {
+    pub bidder_id: String,
+    pub bid_amount_cents: i64,
+    pub bid_time: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BidResponse {
+    pub id: String,
+    pub auction_id: String,
+    pub bidder_id: String,
+    pub bid_amount_cents: i64,
+    pub bid_time: i64,
+}
+
+impl From<BidRecord> for BidResponse {
+    fn from(record: BidRecord) -> Self {
+        Self {
+            id: record.id,
+            auction_id: record.auction_id,
+            bidder_id: record.bidder_id,
+            bid_amount_cents: record.bid_amount_cents,
+            bid_time: record.bid_time,
+        }
+    }
 }

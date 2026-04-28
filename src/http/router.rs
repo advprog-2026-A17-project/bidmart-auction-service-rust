@@ -4,8 +4,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
-use crate::http::dto::{AuctionResponse, CreateAuctionRequest, ErrorResponse};
-use crate::service::auction_service::{AuctionService, CreateAuctionError, GetAuctionError};
+use crate::http::dto::{
+    AuctionResponse, BidResponse, CreateAuctionRequest, ErrorResponse, PlaceBidRequest,
+};
+use crate::service::auction_service::{
+    AuctionService, CreateAuctionError, GetAuctionError, PlaceBidError,
+};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -16,6 +20,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/auctions", post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
+        .route("/auctions/:auction_id/bids", post(place_bid))
         .with_state(AppState { auction_service })
 }
 
@@ -38,6 +43,24 @@ async fn get_auction_by_id(
         .ok_or_else(|| ApiError::not_found("auction not found"))?;
 
     Ok(Json(auction.into()))
+}
+
+async fn place_bid(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+    Json(request): Json<PlaceBidRequest>,
+) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
+    let bid = state
+        .auction_service
+        .place_bid_and_persist(
+            &auction_id,
+            &request.bidder_id,
+            request.bid_amount_cents,
+            request.bid_time,
+        )
+        .await?;
+
+    Ok((StatusCode::CREATED, Json(bid.into())))
 }
 
 #[derive(Debug)]
@@ -74,6 +97,25 @@ impl From<GetAuctionError> for ApiError {
     fn from(error: GetAuctionError) -> Self {
         match error {
             GetAuctionError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<PlaceBidError> for ApiError {
+    fn from(error: PlaceBidError) -> Self {
+        match error {
+            PlaceBidError::AuctionNotFound => Self {
+                status: StatusCode::NOT_FOUND,
+                message: "auction not found".to_string(),
+            },
+            PlaceBidError::BidError(error) => Self {
+                status: StatusCode::BAD_REQUEST,
+                message: error.to_string(),
+            },
+            PlaceBidError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

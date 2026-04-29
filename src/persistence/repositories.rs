@@ -157,6 +157,28 @@ impl BidRepository {
         .fetch_optional(&self.pool)
         .await
     }
+
+    pub async fn find_matching_bid(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+        bid_amount_cents: i64,
+        bid_time: i64,
+    ) -> Result<Option<BidRecord>, sqlx::Error> {
+        sqlx::query_as::<_, BidRecord>(
+            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+             FROM bids \
+             WHERE auction_id = ? AND bidder_id = ? AND bid_amount_cents = ? AND bid_time = ? \
+             ORDER BY id ASC \
+             LIMIT 1"
+        )
+        .bind(auction_id)
+        .bind(bidder_id)
+        .bind(bid_amount_cents)
+        .bind(bid_time)
+        .fetch_optional(&self.pool)
+        .await
+    }
 }
 
 #[derive(Debug, Clone)]

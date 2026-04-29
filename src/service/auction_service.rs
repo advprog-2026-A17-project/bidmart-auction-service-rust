@@ -239,6 +239,15 @@ impl AuctionService {
     ) -> Result<BidRecord, PlaceBidError> {
         let _bid_guard = self.auction_bid_guard(auction_id).await;
 
+        if let Some(existing_bid) = self
+            .bid_repo
+            .find_matching_bid(auction_id, bidder_id, bid_amount_cents, bid_time)
+            .await
+            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
+        {
+            return Ok(existing_bid);
+        }
+
         // Fetch auction
         let auction_record = self
             .auction_repo

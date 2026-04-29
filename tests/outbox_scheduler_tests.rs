@@ -3,11 +3,13 @@ use std::time::Duration;
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-use bidmart_auction_service_rust::persistence::models::NewOutboxEventRecord;
+use bidmart_auction_service_rust::persistence::models::{NewOutboxEventRecord, OutboxEventRecord};
 use bidmart_auction_service_rust::persistence::repositories::OutboxRepository;
 use bidmart_auction_service_rust::scheduler::outbox_scheduler::{
-    OutboxPublishError, OutboxScheduler,
+    HttpOutboxPublisher, OutboxPublishError, OutboxScheduler,
 };
+use axum::{extract::State, routing::post, Json, Router};
+use serde_json::Value;
 
 async fn setup_test_db() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
@@ -33,6 +35,25 @@ async fn setup_test_db() -> SqlitePool {
     }
 
     pool
+}
+
+trait NewOutboxEventRecordTestExt {
+    fn to_record(self) -> OutboxEventRecord;
+}
+
+impl NewOutboxEventRecordTestExt for NewOutboxEventRecord {
+    fn to_record(self) -> OutboxEventRecord {
+        OutboxEventRecord {
+            id: self.id,
+            aggregate_id: self.aggregate_id,
+            event_type: self.event_type,
+            payload: self.payload,
+            published: self.published,
+            published_at: self.published_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
 }
 
 #[tokio::test]
@@ -149,4 +170,51 @@ async fn spawned_outbox_scheduler_publishes_pending_events() {
         published_ids.lock().expect("lock published ids").as_slice(),
         ["event-spawned"]
     );
+}
+
+#[tokio::test]
+async fn http_outbox_publisher_posts_event_to_relay_transport() {
+    let received_payloads = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let app = Router::new()
+        .route(
+            "/events",
+            post(
+                |State(received): State<Arc<Mutex<Vec<Value>>>>, Json(payload): Json<Value>| async move {
+                    received.lock().expect("lock received").push(payload);
+                    axum::http::StatusCode::ACCEPTED
+                },
+            ),
+        )
+        .with_state(received_payloads.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let address = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve relay");
+    });
+
+    let publisher = HttpOutboxPublisher::new(format!("http://{address}"), "/events")
+        .expect("create publisher");
+    publisher
+        .publish(NewOutboxEventRecord {
+            id: "event-http".to_string(),
+            aggregate_id: "auction-http".to_string(),
+            event_type: "BidPlaced".to_string(),
+            payload: r#"{"auction_id":"auction-http","listing_id":"listing-http","current_price_cents":1500}"#.to_string(),
+            published: false,
+            published_at: None,
+            created_at: chrono::Utc::now().timestamp(),
+            updated_at: chrono::Utc::now().timestamp(),
+        }
+        .to_record())
+        .await
+        .expect("publish event");
+
+    let payloads = received_payloads.lock().expect("lock received");
+    assert_eq!(payloads.len(), 1);
+    assert_eq!(payloads[0]["id"], "event-http");
+    assert_eq!(payloads[0]["event_type"], "BidPlaced");
+    assert_eq!(payloads[0]["payload"]["listing_id"], "listing-http");
+    assert_eq!(payloads[0]["payload"]["current_price_cents"], 1500);
 }

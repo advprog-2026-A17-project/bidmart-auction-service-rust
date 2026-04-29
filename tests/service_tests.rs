@@ -93,6 +93,54 @@ async fn test_service_place_bid() {
 }
 
 #[tokio::test]
+async fn place_bid_retry_with_same_bid_details_is_idempotent() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-idempotent".to_string(),
+            seller_id: "seller-1".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now,
+            end_time: now + 300,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    let first = service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
+        .await
+        .expect("first bid");
+    let retry = service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
+        .await
+        .expect("retry bid");
+
+    assert_eq!(retry.id, first.id);
+    let bids = bid_repo
+        .list_by_auction_id_desc(&auction_id)
+        .await
+        .expect("list bids");
+    assert_eq!(bids.len(), 1);
+    let events = outbox_repo.list_pending(10).await.expect("list outbox");
+    assert_eq!(events.len(), 1);
+}
+
+#[tokio::test]
 async fn test_service_place_bid_on_nonexistent_auction() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

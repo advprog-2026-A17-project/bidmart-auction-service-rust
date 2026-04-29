@@ -58,6 +58,41 @@ impl AuctionRepository {
         .fetch_all(&self.pool)
         .await
     }
+
+    pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<AuctionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AuctionRecord>(
+            "SELECT id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
+             FROM auctions \
+             WHERE end_time <= ? AND status NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             ORDER BY end_time ASC"
+        )
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn update_lifecycle_status(
+        &self,
+        auction_id: &str,
+        status: &str,
+        current_highest_bid_cents: Option<i64>,
+        updated_at: i64,
+    ) -> Result<AuctionRecord, sqlx::Error> {
+        sqlx::query_as::<_, AuctionRecord>(
+            "UPDATE auctions \
+             SET status = ?, current_highest_bid_cents = ?, updated_at = ? \
+             WHERE id = ? \
+             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at"
+        )
+        .bind(status)
+        .bind(current_highest_bid_cents)
+        .bind(updated_at)
+        .bind(auction_id)
+        .fetch_one(&self.pool)
+        .await
+    }
 }
 
 #[derive(Debug, Clone)]

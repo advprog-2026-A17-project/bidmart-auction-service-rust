@@ -138,6 +138,57 @@ impl AuctionService {
             .map_err(|error| ListAuctionsError::DatabaseError(error.to_string()))
     }
 
+    pub async fn list_pending_closure(
+        &self,
+    ) -> Result<Vec<AuctionRecord>, ListPendingClosureError> {
+        let now = chrono::Utc::now().timestamp();
+        self.auction_repo
+            .list_pending_closure(now)
+            .await
+            .map_err(|error| ListPendingClosureError::DatabaseError(error.to_string()))
+    }
+
+    pub async fn close_auction(&self, auction_id: &str) -> Result<AuctionRecord, CloseAuctionError> {
+        let auction = self
+            .auction_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?
+            .ok_or(CloseAuctionError::AuctionNotFound)?;
+
+        let now = chrono::Utc::now().timestamp();
+        if auction.end_time > now {
+            return Err(CloseAuctionError::AuctionNotEnded);
+        }
+
+        if auction.status == "WON" || auction.status == "UNSOLD" {
+            return Ok(auction);
+        }
+
+        let winning_bid = self
+            .bid_repo
+            .find_winning_bid(auction_id)
+            .await
+            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+        let highest_bid_cents = winning_bid
+            .as_ref()
+            .map(|bid| bid.bid_amount_cents)
+            .or(auction.current_highest_bid_cents);
+        let status = if highest_bid_cents
+            .map(|amount| amount >= auction.reserve_price_cents)
+            .unwrap_or(false)
+        {
+            "WON"
+        } else {
+            "UNSOLD"
+        };
+
+        self.auction_repo
+            .update_lifecycle_status(auction_id, status, highest_bid_cents, now)
+            .await
+            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))
+    }
+
     pub async fn list_bids(&self, auction_id: &str) -> Result<Vec<BidRecord>, ListBidsError> {
         self.bid_repo
             .list_by_auction_id_desc(auction_id)
@@ -430,6 +481,22 @@ pub enum GetAuctionError {
 
 #[derive(Debug, Error)]
 pub enum ListAuctionsError {
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+}
+
+#[derive(Debug, Error)]
+pub enum ListPendingClosureError {
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+}
+
+#[derive(Debug, Error)]
+pub enum CloseAuctionError {
+    #[error("Auction not found")]
+    AuctionNotFound,
+    #[error("Auction has not reached its end time")]
+    AuctionNotEnded,
     #[error("Database error: {0}")]
     DatabaseError(String),
 }

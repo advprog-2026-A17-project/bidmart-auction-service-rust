@@ -11,8 +11,8 @@ use crate::http::dto::{
     PlaceBidRequest,
 };
 use crate::service::auction_service::{
-    AuctionService, CreateAuctionError, GetAuctionError, ListAuctionsError, ListBidsError,
-    PlaceBidError,
+    AuctionService, CloseAuctionError, CreateAuctionError, GetAuctionError, ListAuctionsError,
+    ListBidsError, ListPendingClosureError, PlaceBidError,
 };
 
 #[derive(Debug, Clone)]
@@ -29,7 +29,9 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
         .route("/api/v1/auctions", get(list_auctions).post(create_auction))
+        .route("/api/v1/auctions/pending-closure", get(list_pending_closure))
         .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
+        .route("/api/v1/auctions/:auction_id/close", axum::routing::post(close_auction))
         .route(
             "/api/v1/auctions/:auction_id/bids",
             get(list_bids).post(place_bid),
@@ -70,6 +72,22 @@ async fn get_auction_by_id(
         .await?
         .ok_or_else(|| ApiError::not_found("auction not found"))?;
 
+    Ok(Json(auction.into()))
+}
+
+async fn list_pending_closure(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AuctionResponse>>, ApiError> {
+    let auctions = state.auction_service.list_pending_closure().await?;
+    let response = auctions.into_iter().map(AuctionResponse::from).collect();
+    Ok(Json(response))
+}
+
+async fn close_auction(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+) -> Result<Json<AuctionResponse>, ApiError> {
+    let auction = state.auction_service.close_auction(&auction_id).await?;
     Ok(Json(auction.into()))
 }
 
@@ -155,6 +173,36 @@ impl From<ListAuctionsError> for ApiError {
     fn from(error: ListAuctionsError) -> Self {
         match error {
             ListAuctionsError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<ListPendingClosureError> for ApiError {
+    fn from(error: ListPendingClosureError) -> Self {
+        match error {
+            ListPendingClosureError::DatabaseError(message) => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            },
+        }
+    }
+}
+
+impl From<CloseAuctionError> for ApiError {
+    fn from(error: CloseAuctionError) -> Self {
+        match error {
+            CloseAuctionError::AuctionNotFound => Self {
+                status: StatusCode::NOT_FOUND,
+                message: "auction not found".to_string(),
+            },
+            CloseAuctionError::AuctionNotEnded => Self {
+                status: StatusCode::BAD_REQUEST,
+                message: "auction has not reached its end time".to_string(),
+            },
+            CloseAuctionError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

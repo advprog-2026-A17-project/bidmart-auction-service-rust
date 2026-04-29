@@ -1,5 +1,5 @@
 pub mod catalog_client;
-mod http_service_client;
+pub(crate) mod http_service_client;
 pub mod wallet_client;
 
 pub use catalog_client::{CatalogClient, CatalogClientError, HttpCatalogClient, ListingSummary};

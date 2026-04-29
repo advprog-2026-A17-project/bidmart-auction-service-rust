@@ -4,6 +4,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
+use crate::client::http_service_client::{HttpServiceClient, HttpServiceClientError};
 use crate::persistence::models::OutboxEventRecord;
 use crate::persistence::repositories::OutboxRepository;
 
@@ -86,6 +87,60 @@ pub struct OutboxPublishReport {
     pub attempted: usize,
     pub published: usize,
     pub failed: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HttpOutboxPublisher {
+    client: HttpServiceClient,
+    path: String,
+}
+
+impl HttpOutboxPublisher {
+    pub fn new(
+        base_url: impl AsRef<str>,
+        path: impl Into<String>,
+    ) -> Result<Self, OutboxPublishError> {
+        let client = HttpServiceClient::new(base_url, "outbox relay")
+            .map_err(|error| OutboxPublishError::new(error.to_string()))?;
+        Ok(Self {
+            client,
+            path: path.into(),
+        })
+    }
+
+    pub async fn publish(&self, event: OutboxEventRecord) -> Result<(), OutboxPublishError> {
+        let payload = serde_json::from_str::<serde_json::Value>(&event.payload)
+            .unwrap_or_else(|_| serde_json::Value::String(event.payload.clone()));
+        let envelope = serde_json::json!({
+            "id": event.id,
+            "aggregate_id": event.aggregate_id,
+            "event_type": event.event_type,
+            "payload": payload,
+            "created_at": event.created_at
+        });
+        let response = self
+            .client
+            .post_json(
+                self.path.clone(),
+                serde_json::to_vec(&envelope)
+                    .map_err(|error| OutboxPublishError::new(error.to_string()))?,
+            )
+            .await
+            .map_err(map_http_error)?;
+
+        if !response.status.is_success() {
+            return Err(OutboxPublishError::new(format!(
+                "outbox relay returned {}",
+                response.status
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+fn map_http_error(error: HttpServiceClientError) -> OutboxPublishError {
+    OutboxPublishError::new(error.to_string())
 }
 
 #[derive(Debug, Clone, Error)]

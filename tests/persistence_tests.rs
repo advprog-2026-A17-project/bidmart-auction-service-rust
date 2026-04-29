@@ -129,6 +129,64 @@ async fn test_insert_and_list_bids() {
 }
 
 #[tokio::test]
+async fn test_winning_bid_tie_breaks_equal_amount_and_time_by_bid_id() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-fairness".to_string(),
+            seller_id: "seller-1".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 1500,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 100,
+            status: "ACTIVE".to_string(),
+            start_time: now,
+            end_time: now + 300,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    bid_repo
+        .insert(&NewBidRecord {
+            id: "bid-b".to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-b".to_string(),
+            bid_amount_cents: 1500,
+            bid_time: now + 10,
+        })
+        .await
+        .expect("insert second lexical bid first");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: "bid-a".to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-a".to_string(),
+            bid_amount_cents: 1500,
+            bid_time: now + 10,
+        })
+        .await
+        .expect("insert first lexical bid second");
+
+    let winning = bid_repo
+        .find_winning_bid(&auction_id)
+        .await
+        .expect("find winning")
+        .expect("winning bid");
+
+    assert_eq!(winning.id, "bid-a");
+    assert_eq!(winning.bidder_id, "bidder-a");
+}
+
+#[tokio::test]
 async fn test_outbox_insert_list_and_mark_published() {
     let pool = setup_test_db().await;
     let outbox_repo = OutboxRepository::new(pool);

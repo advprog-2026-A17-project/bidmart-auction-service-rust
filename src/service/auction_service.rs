@@ -8,6 +8,7 @@ use crate::persistence::models::{
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use thiserror::Error;
 
+#[derive(Clone)]
 pub struct AuctionService {
     auction_repo: AuctionRepository,
     bid_repo: BidRepository,
@@ -208,6 +209,10 @@ impl AuctionService {
                 }
             }
         }
+
+        self.publish_auction_ended_event(&updated, winning_bid)
+            .await
+            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
 
         Ok(updated)
     }
@@ -436,6 +441,36 @@ impl AuctionService {
             published_at: None,
             created_at: now as i64,
             updated_at: now as i64,
+        };
+        self.outbox_repo.insert(&event).await?;
+        Ok(())
+    }
+
+    async fn publish_auction_ended_event(
+        &self,
+        auction: &AuctionRecord,
+        winning_bid: Option<&BidRecord>,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({
+            "auction_id": auction.id,
+            "listing_id": auction.listing_id,
+            "seller_id": auction.seller_id,
+            "status": auction.status,
+            "winner_bidder_id": winning_bid.map(|bid| bid.bidder_id.as_str()),
+            "winning_bid_cents": winning_bid.map(|bid| bid.bid_amount_cents),
+            "ended_at": now
+        })
+        .to_string();
+        let event = NewOutboxEventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            aggregate_id: auction.id.clone(),
+            event_type: "AuctionEnded".to_string(),
+            payload,
+            published: false,
+            published_at: None,
+            created_at: now,
+            updated_at: now,
         };
         self.outbox_repo.insert(&event).await?;
         Ok(())

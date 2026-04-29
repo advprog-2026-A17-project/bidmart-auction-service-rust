@@ -88,6 +88,8 @@ async fn test_service_place_bid() {
         .expect("list outbox");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "BidPlaced");
+    assert!(events[0].payload.contains("\"listing_id\":\"listing-1\""));
+    assert!(events[0].payload.contains("\"current_price_cents\":1500"));
 }
 
 #[tokio::test]

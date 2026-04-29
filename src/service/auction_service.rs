@@ -330,7 +330,7 @@ impl AuctionService {
         .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
         // Publish event via outbox
-        self.publish_bid_placed_event(auction_id, bidder_id, bid_amount_cents)
+        self.publish_bid_placed_event(&updated_record, &inserted_bid)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
@@ -431,23 +431,30 @@ impl AuctionService {
 
     async fn publish_bid_placed_event(
         &self,
-        auction_id: &str,
-        bidder_id: &str,
-        bid_amount_cents: i64,
+        auction: &AuctionRecord,
+        bid: &BidRecord,
     ) -> Result<(), sqlx::Error> {
-        let now = chrono::Local::now().timestamp() as u64;
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({
+            "auction_id": auction.id,
+            "listing_id": auction.listing_id,
+            "bid_id": bid.id,
+            "bidder_id": bid.bidder_id,
+            "amount_cents": bid.bid_amount_cents,
+            "current_price_cents": bid.bid_amount_cents,
+            "bid_time": bid.bid_time,
+            "placed_at": now
+        })
+        .to_string();
         let event = NewOutboxEventRecord {
             id: uuid::Uuid::new_v4().to_string(),
-            aggregate_id: auction_id.to_string(),
+            aggregate_id: auction.id.clone(),
             event_type: "BidPlaced".to_string(),
-            payload: format!(
-                r#"{{"auction_id":"{}","bidder_id":"{}","amount_cents":{}}}"#,
-                auction_id, bidder_id, bid_amount_cents
-            ),
+            payload,
             published: false,
             published_at: None,
-            created_at: now as i64,
-            updated_at: now as i64,
+            created_at: now,
+            updated_at: now,
         };
         self.outbox_repo.insert(&event).await?;
         Ok(())

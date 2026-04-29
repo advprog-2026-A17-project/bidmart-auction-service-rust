@@ -317,17 +317,31 @@ impl AuctionService {
         updated_record.status = self.status_to_string(auction.status());
         updated_record.updated_at = bid_time;
 
-        sqlx::query(
-            "UPDATE auctions SET current_highest_bid_cents = ?, end_time = ?, status = ?, updated_at = ? WHERE id = ?",
+        let persisted_update = sqlx::query_as::<_, AuctionRecord>(
+            "UPDATE auctions \
+             SET current_highest_bid_cents = ?, end_time = ?, status = ?, updated_at = ? \
+             WHERE id = ? AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < ?) \
+             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at",
         )
         .bind(updated_record.current_highest_bid_cents)
         .bind(updated_record.end_time)
         .bind(&updated_record.status)
         .bind(updated_record.updated_at)
         .bind(auction_id)
-        .execute(&self.auction_repo.pool)
+        .bind(new_highest_cents)
+        .fetch_optional(&self.auction_repo.pool)
         .await
         .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+        updated_record = match persisted_update {
+            Some(record) => record,
+            None => self
+                .auction_repo
+                .find_by_id(auction_id)
+                .await
+                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
+                .unwrap_or(updated_record),
+        };
 
         // Publish event via outbox
         self.publish_bid_placed_event(&updated_record, &inserted_bid)

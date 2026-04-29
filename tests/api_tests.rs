@@ -596,3 +596,156 @@ async fn list_bids_returns_bid_history_for_auction() {
     assert_eq!(bids[1]["bidder_id"], json!("bidder-low"));
     assert_eq!(bids[1]["bid_amount_cents"], json!(1500));
 }
+
+#[tokio::test]
+async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-close".to_string(),
+        seller_id: "seller-close".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: Some(5500),
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now - 3_600,
+        end_time: now - 60,
+        created_at: now - 3_600,
+        updated_at: now - 60,
+    };
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "winner".to_string(),
+            bid_amount_cents: 5500,
+            bid_time: now - 120,
+        })
+        .await
+        .expect("insert winning bid");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/auctions/{auction_id}/close"))
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    assert_eq!(response_body["status"], json!("WON"));
+    assert_eq!(response_body["current_highest_bid_cents"], json!(5500));
+
+    let persisted = auction_repo
+        .find_by_id(&auction_id)
+        .await
+        .expect("find auction")
+        .expect("auction exists");
+    assert_eq!(persisted.status, "WON");
+}
+
+#[tokio::test]
+async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: "pending-close".to_string(),
+            listing_id: "listing-pending".to_string(),
+            seller_id: "seller-pending".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 3_600,
+            end_time: now - 60,
+            created_at: now - 3_600,
+            updated_at: now - 60,
+        })
+        .await
+        .expect("insert pending auction");
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: "future-close".to_string(),
+            listing_id: "listing-future".to_string(),
+            seller_id: "seller-future".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 60,
+            end_time: now + 3_600,
+            created_at: now - 60,
+            updated_at: now - 60,
+        })
+        .await
+        .expect("insert future auction");
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: "already-won".to_string(),
+            listing_id: "listing-won".to_string(),
+            seller_id: "seller-won".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: Some(6000),
+            minimum_increment_cents: 200,
+            status: "WON".to_string(),
+            start_time: now - 3_600,
+            end_time: now - 60,
+            created_at: now - 3_600,
+            updated_at: now - 60,
+        })
+        .await
+        .expect("insert closed auction");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/auctions/pending-closure")
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    let items = response_body.as_array().expect("response is an array");
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], json!("pending-close"));
+}

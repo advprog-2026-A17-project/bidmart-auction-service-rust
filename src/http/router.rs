@@ -202,6 +202,10 @@ impl From<CloseAuctionError> for ApiError {
                 status: StatusCode::BAD_REQUEST,
                 message: "auction has not reached its end time".to_string(),
             },
+            CloseAuctionError::WalletError(message) => Self {
+                status: StatusCode::PAYMENT_REQUIRED,
+                message,
+            },
             CloseAuctionError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,

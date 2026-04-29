@@ -165,13 +165,13 @@ impl AuctionService {
             return Ok(auction);
         }
 
-        let winning_bid = self
+        let bids = self
             .bid_repo
-            .find_winning_bid(auction_id)
+            .list_by_auction_id_desc(auction_id)
             .await
             .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+        let winning_bid = bids.first();
         let highest_bid_cents = winning_bid
-            .as_ref()
             .map(|bid| bid.bid_amount_cents)
             .or(auction.current_highest_bid_cents);
         let status = if highest_bid_cents
@@ -183,10 +183,33 @@ impl AuctionService {
             "UNSOLD"
         };
 
-        self.auction_repo
+        let updated = self
+            .auction_repo
             .update_lifecycle_status(auction_id, status, highest_bid_cents, now)
             .await
-            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))
+            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+
+        if let Some(wallet_client) = &self.wallet_client {
+            if status == "WON" {
+                if let Some(hold_id) = winning_bid.and_then(|bid| bid.wallet_hold_id.as_deref()) {
+                    wallet_client
+                        .convert_hold_to_payment(hold_id)
+                        .await
+                        .map_err(|error| CloseAuctionError::WalletError(error.to_string()))?;
+                }
+            } else {
+                for bid in &bids {
+                    if let Some(hold_id) = &bid.wallet_hold_id {
+                        wallet_client
+                            .release_hold(hold_id)
+                            .await
+                            .map_err(|error| CloseAuctionError::WalletError(error.to_string()))?;
+                    }
+                }
+            }
+        }
+
+        Ok(updated)
     }
 
     pub async fn list_bids(&self, auction_id: &str) -> Result<Vec<BidRecord>, ListBidsError> {
@@ -214,6 +237,12 @@ impl AuctionService {
         self.validate_listing_for_bid(&auction_record.listing_id)
             .await?;
 
+        let previous_winning_bid = self
+            .bid_repo
+            .find_winning_bid(auction_id)
+            .await
+            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+
         // Convert to domain object with current highest bid
         let mut auction = self
             .record_to_domain_with_bid(&auction_record)
@@ -229,7 +258,7 @@ impl AuctionService {
         .map_err(PlaceBidError::BidError)?;
 
         // Hold funds from wallet (blocking operation, part of critical path)
-        let _hold_id = if let Some(wallet_client) = &self.wallet_client {
+        let hold_id = if let Some(wallet_client) = &self.wallet_client {
             let hold_request = HoldFundsRequest {
                 user_id: bidder_id.to_string(),
                 amount_cents: bid_amount_cents,
@@ -254,9 +283,19 @@ impl AuctionService {
         };
         let inserted_bid = self
             .bid_repo
-            .insert(&bid_record)
+            .insert_with_wallet_hold(&bid_record, hold_id.as_deref())
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+
+        if let (Some(wallet_client), Some(previous_hold_id)) = (
+            &self.wallet_client,
+            previous_winning_bid.and_then(|bid| bid.wallet_hold_id),
+        ) {
+            wallet_client
+                .release_hold(&previous_hold_id)
+                .await
+                .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+        }
 
         // Update auction if it was extended or if current highest bid changed
         let new_highest_cents = bid_result.new_highest.amount.cents() as i64;
@@ -497,6 +536,8 @@ pub enum CloseAuctionError {
     AuctionNotFound,
     #[error("Auction has not reached its end time")]
     AuctionNotEnded,
+    #[error("Wallet error: {0}")]
+    WalletError(String),
     #[error("Database error: {0}")]
     DatabaseError(String),
 }

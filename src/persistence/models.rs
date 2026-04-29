@@ -39,6 +39,7 @@ pub struct BidRecord {
     pub bidder_id: String,
     pub bid_amount_cents: i64,
     pub bid_time: i64,
+    pub wallet_hold_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

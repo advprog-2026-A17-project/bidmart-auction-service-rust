@@ -19,6 +19,7 @@ CREATE TABLE bids (
     bidder_id TEXT NOT NULL,
     bid_amount_cents INTEGER NOT NULL,
     bid_time INTEGER NOT NULL,
+    wallet_hold_id TEXT,
     FOREIGN KEY (auction_id) REFERENCES auctions(id)
 );
 

@@ -106,16 +106,25 @@ impl BidRepository {
     }
 
     pub async fn insert(&self, bid: &NewBidRecord) -> Result<BidRecord, sqlx::Error> {
+        self.insert_with_wallet_hold(bid, None).await
+    }
+
+    pub async fn insert_with_wallet_hold(
+        &self,
+        bid: &NewBidRecord,
+        wallet_hold_id: Option<&str>,
+    ) -> Result<BidRecord, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "INSERT INTO bids (id, auction_id, bidder_id, bid_amount_cents, bid_time) \
-             VALUES (?, ?, ?, ?, ?) \
-             RETURNING id, auction_id, bidder_id, bid_amount_cents, bid_time"
+            "INSERT INTO bids (id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id) \
+             VALUES (?, ?, ?, ?, ?, ?) \
+             RETURNING id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id"
         )
         .bind(&bid.id)
         .bind(&bid.auction_id)
         .bind(&bid.bidder_id)
         .bind(bid.bid_amount_cents)
         .bind(bid.bid_time)
+        .bind(wallet_hold_id)
         .fetch_one(&self.pool)
         .await
     }
@@ -125,7 +134,7 @@ impl BidRepository {
         auction_id: &str,
     ) -> Result<Vec<BidRecord>, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time \
+            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
              FROM bids WHERE auction_id = ? \
              ORDER BY bid_amount_cents DESC, bid_time ASC"
         )
@@ -139,7 +148,7 @@ impl BidRepository {
         auction_id: &str,
     ) -> Result<Option<BidRecord>, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time \
+            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
              FROM bids WHERE auction_id = ? \
              ORDER BY bid_amount_cents DESC, bid_time ASC \
              LIMIT 1"

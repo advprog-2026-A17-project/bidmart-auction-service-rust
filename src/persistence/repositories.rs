@@ -136,7 +136,7 @@ impl BidRepository {
         sqlx::query_as::<_, BidRecord>(
             "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
              FROM bids WHERE auction_id = ? \
-             ORDER BY bid_amount_cents DESC, bid_time ASC"
+             ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC"
         )
         .bind(auction_id)
         .fetch_all(&self.pool)
@@ -150,7 +150,7 @@ impl BidRepository {
         sqlx::query_as::<_, BidRecord>(
             "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
              FROM bids WHERE auction_id = ? \
-             ORDER BY bid_amount_cents DESC, bid_time ASC \
+             ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC \
              LIMIT 1"
         )
         .bind(auction_id)

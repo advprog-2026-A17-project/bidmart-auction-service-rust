@@ -1,10 +1,9 @@
 #[test]
 fn docker_compose_routes_gateway_auction_traffic_to_rust_service() {
-    let compose = std::fs::read_to_string("../bidmart-infrastructure/docker-compose.yml")
-        .expect("read docker compose");
+    let compose = std::fs::read_to_string("../docker-compose.yml").expect("read docker compose");
 
     assert!(compose.contains("AUCTION_SERVICE_URL: ${AUCTION_SERVICE_URL:-http://auction-service:8082}"));
-    assert!(compose.contains("context: ../bidmart-auction-service-rust"));
+    assert!(compose.contains("context: ./bidmart-auction-service-rust"));
     assert!(compose.contains("BIND_ADDRESS: 0.0.0.0:8082"));
     assert!(compose.contains("DATABASE_URL: ${AUCTION_DATABASE_URL:-sqlite:///data/bidmart-auction.db}"));
     assert!(compose.contains("auction-rust-data:/data"));

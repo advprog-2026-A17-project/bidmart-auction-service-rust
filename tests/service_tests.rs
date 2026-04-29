@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
+use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord};
 use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
@@ -334,4 +334,54 @@ async fn test_place_bid_triggers_anti_sniping_extension() {
     // Should be extended by 120 seconds from bid_time
     assert!(updated_auction.end_time > end_time);
     assert_eq!(updated_auction.status, "EXTENDED");
+}
+
+#[tokio::test]
+async fn close_auction_publishes_auction_ended_outbox_event() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-ended".to_string(),
+            seller_id: "seller-ended".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 1500,
+            current_highest_bid_cents: Some(2000),
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 600,
+            end_time: now - 1,
+            created_at: now - 600,
+            updated_at: now - 1,
+        })
+        .await
+        .expect("insert auction");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "winner".to_string(),
+            bid_amount_cents: 2000,
+            bid_time: now - 10,
+        })
+        .await
+        .expect("insert bid");
+
+    let closed = service.close_auction(&auction_id).await.expect("close");
+
+    assert_eq!(closed.status, "WON");
+    let events = outbox_repo.list_pending(10).await.expect("list events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].aggregate_id, auction_id);
+    assert_eq!(events[0].event_type, "AuctionEnded");
+    assert!(events[0].payload.contains("\"status\":\"WON\""));
+    assert!(events[0].payload.contains("\"winner_bidder_id\":\"winner\""));
 }

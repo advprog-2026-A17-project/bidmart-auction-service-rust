@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
 use crate::client::{CatalogClient, HoldFundsRequest, ListingSummary, WalletClient};
@@ -7,6 +8,7 @@ use crate::persistence::models::{
 };
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use thiserror::Error;
+use tokio::sync::OwnedMutexGuard;
 
 #[derive(Clone)]
 pub struct AuctionService {
@@ -15,6 +17,7 @@ pub struct AuctionService {
     outbox_repo: OutboxRepository,
     wallet_client: Option<Arc<dyn WalletClient>>,
     catalog_client: Option<Arc<dyn CatalogClient>>,
+    bid_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl std::fmt::Debug for AuctionService {
@@ -25,6 +28,7 @@ impl std::fmt::Debug for AuctionService {
             .field("outbox_repo", &"<OutboxRepository>")
             .field("wallet_client", &"<WalletClient>")
             .field("catalog_client", &"<CatalogClient>")
+            .field("bid_locks", &"<BidLocks>")
             .finish()
     }
 }
@@ -69,6 +73,7 @@ impl AuctionService {
             outbox_repo,
             wallet_client,
             catalog_client,
+            bid_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -232,6 +237,8 @@ impl AuctionService {
         bid_amount_cents: i64,
         bid_time: i64,
     ) -> Result<BidRecord, PlaceBidError> {
+        let _bid_guard = self.auction_bid_guard(auction_id).await;
+
         // Fetch auction
         let auction_record = self
             .auction_repo
@@ -474,6 +481,18 @@ impl AuctionService {
         };
         self.outbox_repo.insert(&event).await?;
         Ok(())
+    }
+
+    async fn auction_bid_guard(&self, auction_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut bid_locks = self.bid_locks.lock().expect("bid lock map poisoned");
+            bid_locks
+                .entry(auction_id.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+
+        lock.lock_owned().await
     }
 }
 

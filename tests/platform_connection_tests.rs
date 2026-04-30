@@ -12,5 +12,6 @@ fn api_docs_describe_rust_auction_service_as_http_connected() {
 fn dockerfile_uses_rust_builder_supported_by_locked_dependencies() {
     let dockerfile = std::fs::read_to_string("Dockerfile").expect("read dockerfile");
 
-    assert!(dockerfile.contains("FROM rust:1.86-bookworm AS builder"));
+    assert!(dockerfile.contains("FROM rust:1.88-bookworm AS builder"));
+    assert!(dockerfile.contains("cargo build --release --locked"));
 }

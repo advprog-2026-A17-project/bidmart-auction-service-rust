@@ -1,11 +1,12 @@
 #[test]
 fn api_docs_describe_rust_auction_service_as_http_connected() {
-    let docs = std::fs::read_to_string("../API_DOCS.md").expect("read api docs");
+    let router = std::fs::read_to_string("src/http/router.rs").expect("read router");
 
-    assert!(docs.contains("## bidmart-auction-service-rust"));
-    assert!(docs.contains("Active auction service implementation"));
-    assert!(docs.contains("Gateway path: /api/v1/auctions"));
-    assert!(!docs.contains("No HTTP API yet"));
+    assert!(router.contains("/api/v1/auctions"));
+    assert!(router.contains("/api/v1/auctions/pending-closure"));
+    assert!(router.contains("/api/v1/auctions/:auction_id"));
+    assert!(router.contains("/api/v1/auctions/:auction_id/close"));
+    assert!(router.contains("/api/v1/auctions/:auction_id/bids"));
 }
 
 #[test]

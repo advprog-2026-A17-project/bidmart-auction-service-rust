@@ -1,4 +1,4 @@
-CREATE TABLE auctions (
+CREATE TABLE IF NOT EXISTS auctions (
     id TEXT PRIMARY KEY,
     listing_id TEXT NOT NULL,
     seller_id TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE auctions (
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE bids (
+CREATE TABLE IF NOT EXISTS bids (
     id TEXT PRIMARY KEY,
     auction_id TEXT NOT NULL,
     bidder_id TEXT NOT NULL,
@@ -23,11 +23,11 @@ CREATE TABLE bids (
     FOREIGN KEY (auction_id) REFERENCES auctions(id)
 );
 
-CREATE INDEX bids_auction_id_idx ON bids(auction_id);
-CREATE INDEX bids_auction_bid_time_idx ON bids(auction_id, bid_time DESC);
-CREATE INDEX bids_auction_amount_idx ON bids(auction_id, bid_amount_cents DESC, bid_time ASC);
+CREATE INDEX IF NOT EXISTS bids_auction_id_idx ON bids(auction_id);
+CREATE INDEX IF NOT EXISTS bids_auction_bid_time_idx ON bids(auction_id, bid_time DESC);
+CREATE INDEX IF NOT EXISTS bids_auction_amount_idx ON bids(auction_id, bid_amount_cents DESC, bid_time ASC);
 
-CREATE TABLE outbox_events (
+CREATE TABLE IF NOT EXISTS outbox_events (
     id TEXT PRIMARY KEY,
     aggregate_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
@@ -38,4 +38,4 @@ CREATE TABLE outbox_events (
     updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX outbox_events_published_idx ON outbox_events(published, created_at);
+CREATE INDEX IF NOT EXISTS outbox_events_published_idx ON outbox_events(published, created_at);

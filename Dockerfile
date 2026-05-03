@@ -10,7 +10,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY migrations migrations/
 COPY src src/
 
-RUN cargo build --release --locked
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked \
+    && cp target/release/bidmart-auction-service-rust ./bidmart-auction-service-rust
 
 FROM debian:bookworm-slim
 
@@ -21,7 +25,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data
 
-COPY --from=builder /app/target/release/bidmart-auction-service-rust /usr/local/bin/bidmart-auction-service-rust
+COPY --from=builder /app/bidmart-auction-service-rust /usr/local/bin/bidmart-auction-service-rust
 
 EXPOSE 8082
 

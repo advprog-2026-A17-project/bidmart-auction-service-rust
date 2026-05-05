@@ -5,6 +5,7 @@ pub struct AuctionRecord {
     pub id: String,
     pub listing_id: String,
     pub seller_id: String,
+    pub auction_type: String,
     pub starting_price_cents: i64,
     pub reserve_price_cents: i64,
     pub current_highest_bid_cents: Option<i64>,

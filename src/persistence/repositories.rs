@@ -16,10 +16,10 @@ impl AuctionRepository {
 
     pub async fn insert(&self, auction: &NewAuctionRecord) -> Result<AuctionRecord, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "INSERT INTO auctions (id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+            "INSERT INTO auctions (id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, current_highest_bid_cents, \
+             VALUES (?, ?, ?, 'ENGLISH', ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, current_highest_bid_cents, \
              minimum_increment_cents, status, start_time, end_time, created_at, updated_at"
         )
         .bind(&auction.id)
@@ -40,7 +40,7 @@ impl AuctionRepository {
 
     pub async fn find_by_id(&self, id: &str) -> Result<Option<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "SELECT id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
              FROM auctions WHERE id = ?"
         )
@@ -51,7 +51,7 @@ impl AuctionRepository {
 
     pub async fn list_all(&self) -> Result<Vec<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "SELECT id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
              FROM auctions ORDER BY created_at DESC"
         )
@@ -61,7 +61,7 @@ impl AuctionRepository {
 
     pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "SELECT id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
              FROM auctions \
              WHERE end_time <= ? AND status NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
@@ -83,7 +83,7 @@ impl AuctionRepository {
             "UPDATE auctions \
              SET status = ?, current_highest_bid_cents = ?, updated_at = ? \
              WHERE id = ? \
-             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at"
         )
         .bind(status)

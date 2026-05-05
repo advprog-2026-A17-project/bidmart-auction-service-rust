@@ -20,6 +20,7 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
         hold_requests: Arc::new(Mutex::new(Vec::new())),
     };
     let captured_requests = state.hold_requests.clone();
+    
     let app = Router::new()
         .route(
             "/api/v1/wallet/hold",
@@ -33,15 +34,15 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
                 (
                     StatusCode::OK,
                     Json(json!({
-                        "id": "wallet-1",
-                        "userId": "bidder-http-1",
-                        "activeBalance": 84.5,
-                        "heldBalance": 15.5
+                        "id": "mock-hold-123",
+                        "status": "ACTIVE",
+                        "amount": 1550
                     })),
                 )
             }),
         )
         .with_state(state);
+        
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind wallet test server");
@@ -53,25 +54,29 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     });
 
     let client = HttpWalletClient::new(format!("http://{address}")).expect("create wallet client");
+
     let response = client
         .hold_funds(HoldFundsRequest {
             user_id: "bidder-http-1".to_string(),
-            amount_cents: 1550,
-            reason: "Bid on auction auction-http-1".to_string(),
+            hold_id: "mock-hold-123".to_string(),
+            auction_id: "auction-http-1".to_string(),
+            bid_id: "bid-http-1".to_string(),
+            amount: 1550,
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
         })
         .await
         .expect("hold funds");
 
-    assert_eq!(response.user_id, "bidder-http-1");
-    assert_eq!(response.amount_cents, 1550);
-    assert!(!response.hold_id.is_empty());
+    assert_eq!(response.id, "mock-hold-123");
+    assert_eq!(response.status, "ACTIVE");
+    assert_eq!(response.amount, 1550);
 
     let requests = captured_requests.lock().expect("lock captured requests");
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["userId"], json!("bidder-http-1"));
-    assert_eq!(requests[0]["amount"], json!(15.5));
-    assert_eq!(
-        requests[0]["description"],
-        json!("Bid on auction auction-http-1")
-    );
+    assert_eq!(requests[0]["holdId"], json!("mock-hold-123"));
+    assert_eq!(requests[0]["auctionId"], json!("auction-http-1"));
+    assert_eq!(requests[0]["bidId"], json!("bid-http-1"));
+    assert_eq!(requests[0]["amount"], json!(1550));
+    assert_eq!(requests[0]["expiresAt"], json!("2026-12-31T23:59:59Z"));
 }

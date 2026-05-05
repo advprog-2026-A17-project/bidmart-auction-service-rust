@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     id TEXT PRIMARY KEY,
     listing_id TEXT NOT NULL,
     seller_id TEXT NOT NULL,
+    auction_type TEXT NOT NULL DEFAULT 'ENGLISH',
     starting_price_cents INTEGER NOT NULL,
     reserve_price_cents INTEGER NOT NULL,
     current_highest_bid_cents INTEGER,

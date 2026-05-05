@@ -9,6 +9,8 @@ pub struct CreateAuctionRequest {
     pub listing_id: Option<String>,
     #[serde(default, alias = "sellerId")]
     pub seller_id: Option<String>,
+    #[serde(default, alias = "auctionType")]
+    pub auction_type: Option<String>,
     #[serde(default)]
     pub starting_price_cents: Option<i64>,
     #[serde(default, rename = "startingPrice")]
@@ -33,6 +35,7 @@ pub struct CreateAuctionRequest {
 
 impl CreateAuctionRequest {
     pub fn try_into_command(self) -> Result<CreateAuctionCommand, String> {
+        validate_auction_type(self.auction_type.as_deref())?;
         Ok(CreateAuctionCommand {
             listing_id: self
                 .listing_id
@@ -63,6 +66,7 @@ pub struct AuctionResponse {
     pub id: String,
     pub listing_id: String,
     pub seller_id: String,
+    pub auction_type: String,
     pub starting_price_cents: i64,
     pub reserve_price_cents: i64,
     pub current_highest_bid_cents: Option<i64>,
@@ -74,6 +78,8 @@ pub struct AuctionResponse {
     pub listing_id_api: String,
     #[serde(rename = "sellerId")]
     pub seller_id_api: String,
+    #[serde(rename = "auctionType")]
+    pub auction_type_api: String,
     #[serde(rename = "startingPrice")]
     pub starting_price: f64,
     #[serde(rename = "reservePrice")]
@@ -92,6 +98,7 @@ impl From<AuctionRecord> for AuctionResponse {
     fn from(record: AuctionRecord) -> Self {
         let listing_id = record.listing_id;
         let seller_id = record.seller_id;
+        let auction_type = record.auction_type;
         let starting_price_cents = record.starting_price_cents;
         let reserve_price_cents = record.reserve_price_cents;
         let current_highest_bid_cents = record.current_highest_bid_cents;
@@ -103,6 +110,7 @@ impl From<AuctionRecord> for AuctionResponse {
             id: record.id,
             listing_id: listing_id.clone(),
             seller_id: seller_id.clone(),
+            auction_type: auction_type.clone(),
             starting_price_cents,
             reserve_price_cents,
             current_highest_bid_cents,
@@ -112,6 +120,7 @@ impl From<AuctionRecord> for AuctionResponse {
             end_time,
             listing_id_api: listing_id,
             seller_id_api: seller_id,
+            auction_type_api: auction_type,
             starting_price: cents_to_decimal(starting_price_cents),
             reserve_price: cents_to_decimal(reserve_price_cents),
             current_highest_bid: current_highest_bid_cents.map(cents_to_decimal),
@@ -210,6 +219,18 @@ fn cents_to_decimal(cents: i64) -> f64 {
 
 fn decimal_to_cents(amount: f64) -> i64 {
     (amount * 100.0).round() as i64
+}
+
+fn validate_auction_type(auction_type: Option<&str>) -> Result<(), String> {
+    let Some(auction_type) = auction_type else {
+        return Ok(());
+    };
+    if auction_type.trim().eq_ignore_ascii_case("ENGLISH") {
+        return Ok(());
+    }
+    Err(format!(
+        "Unsupported auction type: {auction_type}. Only ENGLISH is currently supported"
+    ))
 }
 
 fn resolve_unix_seconds(

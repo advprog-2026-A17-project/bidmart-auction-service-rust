@@ -339,7 +339,7 @@ impl AuctionService {
             "UPDATE auctions \
              SET current_highest_bid_cents = ?, end_time = ?, status = ?, updated_at = ? \
              WHERE id = ? AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < ?) \
-             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at",
         )
         .bind(updated_record.current_highest_bid_cents)

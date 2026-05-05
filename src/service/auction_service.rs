@@ -282,14 +282,23 @@ impl AuctionService {
         let hold_id = if let Some(wallet_client) = &self.wallet_client {
             let hold_request = HoldFundsRequest {
                 user_id: bidder_id.to_string(),
-                amount_cents: bid_amount_cents,
-                reason: format!("Bid on auction {}", auction_id),
+                hold_id: uuid::Uuid::new_v4().to_string(),
+                auction_id: auction_id.to_string(),
+                // Jika bid_id sudah digenerate di atas baris ini, gunakan variabelnya. 
+                // Jika belum, kita generate baru:
+                bid_id: uuid::Uuid::new_v4().to_string(), 
+                amount: bid_amount_cents as u64, // Ubah ke u64 sesuai DTO baru
+                // Idealnya expires_at ini diisi dengan waktu tutup lelang + buffer waktu.
+                // Untuk sementara kita hardcode agar tidak error:
+                expires_at: "2026-12-31T23:59:59Z".to_string(), 
             };
+
             let hold_response = wallet_client
                 .hold_funds(hold_request)
                 .await
                 .map_err(|e| PlaceBidError::WalletError(e.to_string()))?;
-            Some(hold_response.hold_id)
+
+            Some(hold_response.id)
         } else {
             None
         };

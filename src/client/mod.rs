@@ -4,5 +4,5 @@ pub mod wallet_client;
 
 pub use catalog_client::{CatalogClient, CatalogClientError, HttpCatalogClient, ListingSummary};
 pub use wallet_client::{
-    HoldFundsRequest, HoldFundsResponse, HttpWalletClient, WalletClient, WalletClientError,
+    HoldFundsRequest, HoldResponse, HttpWalletClient, WalletClient, WalletClientError,
 };

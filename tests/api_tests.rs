@@ -86,6 +86,8 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(response_body["starting_price_cents"], json!(1000));
     assert_eq!(response_body["reserve_price_cents"], json!(5000));
     assert_eq!(response_body["minimum_increment_cents"], json!(200));
+    assert_eq!(response_body["auction_type"], json!("ENGLISH"));
+    assert_eq!(response_body["auctionType"], json!("ENGLISH"));
     assert_eq!(response_body["current_highest_bid_cents"], Value::Null);
     assert_eq!(response_body["status"], json!("ACTIVE"));
     assert_eq!(response_body["start_time"], json!(now - 60));
@@ -101,7 +103,55 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(persisted.starting_price_cents, 1000);
     assert_eq!(persisted.reserve_price_cents, 5000);
     assert_eq!(persisted.minimum_increment_cents, 200);
+    assert_eq!(persisted.auction_type, "ENGLISH");
     assert_eq!(persisted.status, "ACTIVE");
+}
+
+#[tokio::test]
+async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    let request_body = json!({
+        "listingId": "listing-future-type",
+        "sellerId": "seller-future-type",
+        "auctionType": "SEALED_BID",
+        "startingPrice": 25.5,
+        "reservePrice": 50.0,
+        "minimumIncrement": 2.5,
+        "start_time": now - 60,
+        "end_time": now + 600
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auctions")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    assert!(
+        response_body["message"]
+            .as_str()
+            .expect("message")
+            .contains("Unsupported auction type")
+    );
 }
 
 #[tokio::test]

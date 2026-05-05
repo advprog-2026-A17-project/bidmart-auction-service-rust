@@ -1,15 +1,13 @@
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-use bidmart_auction_service_rust::client::{HoldFundsRequest, HoldFundsResponse, WalletClient, WalletClientError};
+use bidmart_auction_service_rust::client::{HoldFundsRequest, HoldResponse, WalletClient, WalletClientError};
 use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
-// Mock wallet client for testing
 pub struct MockWalletClient {
-    holds: Arc<Mutex<Vec<HoldFundsResponse>>>,
+    holds: Arc<Mutex<Vec<HoldFundsRequest>>>,
     released_holds: Arc<Mutex<Vec<String>>>,
     converted_holds: Arc<Mutex<Vec<String>>>,
     fail_next_hold: Arc<Mutex<bool>>,
@@ -29,7 +27,7 @@ impl MockWalletClient {
         *self.fail_next_hold.lock().unwrap() = true;
     }
 
-    pub fn get_holds(&self) -> Vec<HoldFundsResponse> {
+    pub fn get_holds(&self) -> Vec<HoldFundsRequest> {
         self.holds.lock().unwrap().clone()
     }
 
@@ -44,21 +42,20 @@ impl MockWalletClient {
 
 #[async_trait::async_trait]
 impl WalletClient for MockWalletClient {
-    async fn hold_funds(&self, request: HoldFundsRequest) -> Result<HoldFundsResponse, WalletClientError> {
+    async fn hold_funds(&self, request: HoldFundsRequest) -> Result<HoldResponse, WalletClientError> {
         if *self.fail_next_hold.lock().unwrap() {
             *self.fail_next_hold.lock().unwrap() = false;
             return Err(WalletClientError::InsufficientBalance(
                 "Not enough balance".to_string(),
             ));
         }
-
-        let response = HoldFundsResponse {
-            hold_id: Uuid::new_v4().to_string(),
-            user_id: request.user_id,
-            amount_cents: request.amount_cents,
+        let response = HoldResponse {
+            id: request.hold_id.clone(),
+            status: "ACTIVE".to_string(),
+            amount: request.amount,
         };
 
-        self.holds.lock().unwrap().push(response.clone());
+        self.holds.lock().unwrap().push(request);
         Ok(response)
     }
 
@@ -145,7 +142,7 @@ async fn test_place_bid_holds_funds_from_wallet() {
     let holds = wallet_client.get_holds();
     assert_eq!(holds.len(), 1);
     assert_eq!(holds[0].user_id, "user-1");
-    assert_eq!(holds[0].amount_cents, 1500);
+    assert_eq!(holds[0].amount, 1500);
 }
 
 #[tokio::test]

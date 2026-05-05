@@ -4,7 +4,7 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 
 use bidmart_auction_service_rust::client::{
-    HoldFundsRequest, HoldFundsResponse, WalletClient, WalletClientError,
+    HoldFundsRequest, HoldResponse, WalletClient, WalletClientError,
 };
 use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
@@ -20,15 +20,15 @@ impl WalletClient for DelayingWalletClient {
     async fn hold_funds(
         &self,
         request: HoldFundsRequest,
-    ) -> Result<HoldFundsResponse, WalletClientError> {
+    ) -> Result<HoldResponse, WalletClientError> {
         if request.user_id == "slow-low-bidder" {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        Ok(HoldFundsResponse {
-            hold_id: format!("{}:{}", request.user_id, request.amount_cents),
-            user_id: request.user_id,
-            amount_cents: request.amount_cents,
+        Ok(HoldResponse {
+            id: request.hold_id, 
+            status: "ACTIVE".to_string(),
+            amount: request.amount,
         })
     }
 

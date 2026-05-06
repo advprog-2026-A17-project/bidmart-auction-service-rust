@@ -98,7 +98,7 @@ pub enum AuctionStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuctionOutcome {
-    Won,   // Reserve met and has winner
+    Won,    // Reserve met and has winner
     Unsold, // Reserve not met or no bids
 }
 
@@ -220,7 +220,9 @@ impl Auction {
 
         if now >= self.end_at || self.status == AuctionStatus::Ended {
             self.status = AuctionStatus::Ended;
-            return Err(AuctionStateError::AlreadyEnded { end_at: self.end_at });
+            return Err(AuctionStateError::AlreadyEnded {
+                end_at: self.end_at,
+            });
         }
 
         if self.status == AuctionStatus::Scheduled {
@@ -269,7 +271,9 @@ impl Auction {
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
         if self.status != AuctionStatus::Active && self.status != AuctionStatus::Extended {
-            return Err(BidError::AuctionNotActive { status: self.status });
+            return Err(BidError::AuctionNotActive {
+                status: self.status,
+            });
         }
 
         if now < self.start_at {
@@ -280,7 +284,9 @@ impl Auction {
 
         if now >= self.end_at {
             self.status = AuctionStatus::Ended;
-            return Err(BidError::AuctionEnded { end_at: self.end_at });
+            return Err(BidError::AuctionEnded {
+                end_at: self.end_at,
+            });
         }
 
         // Seller cannot bid on their own auction

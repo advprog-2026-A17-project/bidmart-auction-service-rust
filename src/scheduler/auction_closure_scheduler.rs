@@ -15,7 +15,9 @@ impl AuctionClosureScheduler {
         Self { auction_service }
     }
 
-    pub async fn close_pending(&self) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
+    pub async fn close_pending(
+        &self,
+    ) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
         let auctions = self
             .auction_service
             .list_pending_closure()

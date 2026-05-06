@@ -48,7 +48,13 @@ impl AuctionService {
         outbox_repo: OutboxRepository,
         wallet_client: Arc<dyn WalletClient>,
     ) -> Self {
-        Self::new_with_clients(auction_repo, bid_repo, outbox_repo, Some(wallet_client), None)
+        Self::new_with_clients(
+            auction_repo,
+            bid_repo,
+            outbox_repo,
+            Some(wallet_client),
+            None,
+        )
     }
 
     pub fn new_with_catalog(
@@ -57,7 +63,13 @@ impl AuctionService {
         outbox_repo: OutboxRepository,
         catalog_client: Arc<dyn CatalogClient>,
     ) -> Self {
-        Self::new_with_clients(auction_repo, bid_repo, outbox_repo, None, Some(catalog_client))
+        Self::new_with_clients(
+            auction_repo,
+            bid_repo,
+            outbox_repo,
+            None,
+            Some(catalog_client),
+        )
     }
 
     pub fn new_with_clients(
@@ -154,7 +166,10 @@ impl AuctionService {
             .map_err(|error| ListPendingClosureError::DatabaseError(error.to_string()))
     }
 
-    pub async fn close_auction(&self, auction_id: &str) -> Result<AuctionRecord, CloseAuctionError> {
+    pub async fn close_auction(
+        &self,
+        auction_id: &str,
+    ) -> Result<AuctionRecord, CloseAuctionError> {
         let auction = self
             .auction_repo
             .find_by_id(auction_id)
@@ -271,12 +286,13 @@ impl AuctionService {
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
         // Place bid using domain logic
-        let bid_result = auction.place_bid(
-            UserId::new(bidder_id),
-            Money::from_cents(bid_amount_cents as u64),
-            UnixSeconds::new(bid_time as u64),
-        )
-        .map_err(PlaceBidError::BidError)?;
+        let bid_result = auction
+            .place_bid(
+                UserId::new(bidder_id),
+                Money::from_cents(bid_amount_cents as u64),
+                UnixSeconds::new(bid_time as u64),
+            )
+            .map_err(PlaceBidError::BidError)?;
 
         // Hold funds from wallet (blocking operation, part of critical path)
         let hold_id = if let Some(wallet_client) = &self.wallet_client {
@@ -284,13 +300,13 @@ impl AuctionService {
                 user_id: bidder_id.to_string(),
                 hold_id: uuid::Uuid::new_v4().to_string(),
                 auction_id: auction_id.to_string(),
-                // Jika bid_id sudah digenerate di atas baris ini, gunakan variabelnya. 
+                // Jika bid_id sudah digenerate di atas baris ini, gunakan variabelnya.
                 // Jika belum, kita generate baru:
-                bid_id: uuid::Uuid::new_v4().to_string(), 
+                bid_id: uuid::Uuid::new_v4().to_string(),
                 amount: bid_amount_cents as u64, // Ubah ke u64 sesuai DTO baru
                 // Idealnya expires_at ini diisi dengan waktu tutup lelang + buffer waktu.
                 // Untuk sementara kita hardcode agar tidak error:
-                expires_at: "2026-12-31T23:59:59Z".to_string(), 
+                expires_at: "2026-12-31T23:59:59Z".to_string(),
             };
 
             let hold_response = wallet_client
@@ -337,9 +353,9 @@ impl AuctionService {
 
         let persisted_update = sqlx::query_as::<_, AuctionRecord>(
             "UPDATE auctions \
-             SET current_highest_bid_cents = ?, end_time = ?, status = ?, updated_at = ? \
-             WHERE id = ? AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < ?) \
-             RETURNING id, listing_id, seller_id, starting_price_cents, reserve_price_cents, \
+             SET current_highest_bid_cents = $1, end_time = $2, status = $3, updated_at = $4 \
+             WHERE id = $5 AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < $6) \
+             RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at",
         )
         .bind(updated_record.current_highest_bid_cents)

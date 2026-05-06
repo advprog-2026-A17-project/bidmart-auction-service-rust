@@ -1,10 +1,14 @@
-use sqlx::SqlitePool;
+use bidmart_auction_service_rust::client::{
+    HoldFundsRequest, HoldResponse, WalletClient, WalletClientError,
+};
+use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
+use bidmart_auction_service_rust::persistence::repositories::{
+    AuctionRepository, BidRepository, OutboxRepository,
+};
+use bidmart_auction_service_rust::service::auction_service::AuctionService;
+use sqlx::AnyPool;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-use bidmart_auction_service_rust::client::{HoldFundsRequest, HoldResponse, WalletClient, WalletClientError};
-use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
-use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
-use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
 pub struct MockWalletClient {
     holds: Arc<Mutex<Vec<HoldFundsRequest>>>,
@@ -42,7 +46,10 @@ impl MockWalletClient {
 
 #[async_trait::async_trait]
 impl WalletClient for MockWalletClient {
-    async fn hold_funds(&self, request: HoldFundsRequest) -> Result<HoldResponse, WalletClientError> {
+    async fn hold_funds(
+        &self,
+        request: HoldFundsRequest,
+    ) -> Result<HoldResponse, WalletClientError> {
         if *self.fail_next_hold.lock().unwrap() {
             *self.fail_next_hold.lock().unwrap() = false;
             return Err(WalletClientError::InsufficientBalance(
@@ -62,20 +69,26 @@ impl WalletClient for MockWalletClient {
     async fn release_hold(&self, hold_id: &str) -> Result<(), WalletClientError> {
         let mut holds = self.holds.lock().unwrap();
         holds.retain(|h| h.hold_id != hold_id);
-        self.released_holds.lock().unwrap().push(hold_id.to_string());
+        self.released_holds
+            .lock()
+            .unwrap()
+            .push(hold_id.to_string());
         Ok(())
     }
 
     async fn convert_hold_to_payment(&self, hold_id: &str) -> Result<(), WalletClientError> {
         let mut holds = self.holds.lock().unwrap();
         holds.retain(|h| h.hold_id != hold_id);
-        self.converted_holds.lock().unwrap().push(hold_id.to_string());
+        self.converted_holds
+            .lock()
+            .unwrap()
+            .push(hold_id.to_string());
         Ok(())
     }
 }
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePool::connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -303,7 +316,10 @@ async fn test_close_won_auction_converts_winning_hold() {
         .await
         .expect("expire auction");
 
-    let closed = service.close_auction(&auction_id).await.expect("close auction");
+    let closed = service
+        .close_auction(&auction_id)
+        .await
+        .expect("close auction");
 
     assert_eq!(closed.status, "WON");
     assert_eq!(wallet_client.get_converted_holds(), vec![winning_hold]);
@@ -359,7 +375,10 @@ async fn test_close_unsold_auction_releases_all_holds() {
         .await
         .expect("expire auction");
 
-    let closed = service.close_auction(&auction_id).await.expect("close auction");
+    let closed = service
+        .close_auction(&auction_id)
+        .await
+        .expect("close auction");
 
     assert_eq!(closed.status, "UNSOLD");
     assert_eq!(wallet_client.get_released_holds(), vec![held]);

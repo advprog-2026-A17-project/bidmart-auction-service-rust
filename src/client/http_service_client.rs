@@ -32,7 +32,10 @@ impl HttpServiceClient {
         })
     }
 
-    pub(crate) async fn get(&self, path: impl Into<String>) -> Result<HttpResponse, HttpServiceClientError> {
+    pub(crate) async fn get(
+        &self,
+        path: impl Into<String>,
+    ) -> Result<HttpResponse, HttpServiceClientError> {
         self.send(Method::GET, path.into(), Vec::new(), None).await
     }
 
@@ -53,10 +56,16 @@ impl HttpServiceClient {
         content_type: Option<&str>,
     ) -> Result<HttpResponse, HttpServiceClientError> {
         let host = self.base_url.host_str().ok_or_else(|| {
-            HttpServiceClientError::Configuration(format!("{} URL is missing host", self.service_name))
+            HttpServiceClientError::Configuration(format!(
+                "{} URL is missing host",
+                self.service_name
+            ))
         })?;
         let port = self.base_url.port_or_known_default().ok_or_else(|| {
-            HttpServiceClientError::Configuration(format!("{} URL is missing port", self.service_name))
+            HttpServiceClientError::Configuration(format!(
+                "{} URL is missing port",
+                self.service_name
+            ))
         })?;
         let stream = TcpStream::connect((host, port))
             .await

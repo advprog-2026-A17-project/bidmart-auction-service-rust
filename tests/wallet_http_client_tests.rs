@@ -4,7 +4,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
 use bidmart_auction_service_rust::client::{HoldFundsRequest, HttpWalletClient, WalletClient};
@@ -20,29 +20,31 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
         hold_requests: Arc::new(Mutex::new(Vec::new())),
     };
     let captured_requests = state.hold_requests.clone();
-    
+
     let app = Router::new()
         .route(
             "/api/v1/wallet/hold",
-            post(|State(state): State<WalletState>, Json(payload): Json<Value>| async move {
-                state
-                    .hold_requests
-                    .lock()
-                    .expect("lock hold requests")
-                    .push(payload);
+            post(
+                |State(state): State<WalletState>, Json(payload): Json<Value>| async move {
+                    state
+                        .hold_requests
+                        .lock()
+                        .expect("lock hold requests")
+                        .push(payload);
 
-                (
-                    StatusCode::OK,
-                    Json(json!({
-                        "id": "mock-hold-123",
-                        "status": "ACTIVE",
-                        "amount": 1550
-                    })),
-                )
-            }),
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "id": "mock-hold-123",
+                            "status": "ACTIVE",
+                            "amount": 1550
+                        })),
+                    )
+                },
+            ),
         )
         .with_state(state);
-        
+
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind wallet test server");

@@ -29,9 +29,15 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
         .route("/api/v1/auctions", get(list_auctions).post(create_auction))
-        .route("/api/v1/auctions/pending-closure", get(list_pending_closure))
+        .route(
+            "/api/v1/auctions/pending-closure",
+            get(list_pending_closure),
+        )
         .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
-        .route("/api/v1/auctions/:auction_id/close", axum::routing::post(close_auction))
+        .route(
+            "/api/v1/auctions/:auction_id/close",
+            axum::routing::post(close_auction),
+        )
         .route(
             "/api/v1/auctions/:auction_id/bids",
             get(list_bids).post(place_bid),
@@ -48,7 +54,9 @@ async fn create_auction(
     Ok((StatusCode::CREATED, Json(auction.into())))
 }
 
-async fn list_auctions(State(state): State<AppState>) -> Result<Json<AuctionPageResponse>, ApiError> {
+async fn list_auctions(
+    State(state): State<AppState>,
+) -> Result<Json<AuctionPageResponse>, ApiError> {
     let auctions = state.auction_service.list_auctions().await?;
     let items: Vec<AuctionResponse> = auctions.into_iter().map(AuctionResponse::from).collect();
     let size = items.len() as i64;

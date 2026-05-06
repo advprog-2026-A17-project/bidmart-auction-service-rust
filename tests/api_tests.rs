@@ -1,7 +1,7 @@
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
-use serde_json::{json, Value};
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use serde_json::{Value, json};
+use sqlx::AnyPool;
 use tower::ServiceExt;
 
 use bidmart_auction_service_rust::http::router::create_router;
@@ -11,10 +11,8 @@ use bidmart_auction_service_rust::persistence::repositories::{
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -617,7 +615,10 @@ async fn list_bids_returns_bid_history_for_auction() {
         bid_time: now + 20,
     };
     bid_repo.insert(&lower_bid).await.expect("insert lower bid");
-    bid_repo.insert(&higher_bid).await.expect("insert higher bid");
+    bid_repo
+        .insert(&higher_bid)
+        .await
+        .expect("insert higher bid");
 
     let response = app
         .oneshot(

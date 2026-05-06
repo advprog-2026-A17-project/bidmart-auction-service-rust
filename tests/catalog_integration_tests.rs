@@ -172,6 +172,40 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
 }
 
 #[tokio::test]
+async fn place_bid_accepts_catalog_listing_after_auction_created_lifecycle() {
+    let command = create_command();
+    let catalog_client = Arc::new(MockCatalogClient::new(ListingSummary {
+        id: command.listing_id.clone(),
+        seller_id: command.seller_id.clone(),
+        status: "ACTIVE".to_string(),
+    }));
+    let (service, _auction_repo) = service_with_catalog(catalog_client.clone()).await;
+    let auction = service
+        .create_auction(command.clone())
+        .await
+        .expect("create auction");
+
+    catalog_client.set_listing(ListingSummary {
+        id: command.listing_id,
+        seller_id: command.seller_id,
+        status: "AUCTION_CREATED".to_string(),
+    });
+
+    let bid = service
+        .place_bid_and_persist(
+            &auction.id,
+            "bidder-catalog-auction-created",
+            1500,
+            auction.start_time + 10,
+        )
+        .await
+        .expect("place bid after auction-created lifecycle");
+
+    assert_eq!(bid.auction_id, auction.id);
+    assert_eq!(bid.bidder_id, "bidder-catalog-auction-created");
+}
+
+#[tokio::test]
 async fn place_bid_rejects_inactive_catalog_listing() {
     let command = create_command();
     let catalog_client = Arc::new(MockCatalogClient::new(ListingSummary {

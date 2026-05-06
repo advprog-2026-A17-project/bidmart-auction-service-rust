@@ -46,7 +46,10 @@ pub enum WalletClientError {
 
 #[async_trait::async_trait]
 pub trait WalletClient: Send + Sync {
-    async fn hold_funds(&self, request: HoldFundsRequest) -> Result<HoldResponse, WalletClientError>;
+    async fn hold_funds(
+        &self,
+        request: HoldFundsRequest,
+    ) -> Result<HoldResponse, WalletClientError>;
     async fn release_hold(&self, hold_id: &str) -> Result<(), WalletClientError>;
     async fn convert_hold_to_payment(&self, hold_id: &str) -> Result<(), WalletClientError>;
 }
@@ -111,7 +114,11 @@ impl WalletClient for HttpWalletClient {
             .await
             .map_err(WalletClientError::from_http_error)?;
 
-        if response.status.is_success() { Ok(()) } else { Err(WalletClientError::ServiceError("Failed to release".into())) }
+        if response.status.is_success() {
+            Ok(())
+        } else {
+            Err(WalletClientError::ServiceError("Failed to release".into()))
+        }
     }
 
     async fn convert_hold_to_payment(&self, hold_id: &str) -> Result<(), WalletClientError> {
@@ -127,7 +134,11 @@ impl WalletClient for HttpWalletClient {
             .await
             .map_err(WalletClientError::from_http_error)?;
 
-        if response.status.is_success() { Ok(()) } else { Err(WalletClientError::ServiceError("Failed to convert".into())) }
+        if response.status.is_success() {
+            Ok(())
+        } else {
+            Err(WalletClientError::ServiceError("Failed to convert".into()))
+        }
     }
 }
 

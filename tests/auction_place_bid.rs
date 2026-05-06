@@ -65,7 +65,10 @@ fn accept_first_bid_at_starting_price() {
     assert!(result.previous_highest.is_none());
     assert!(!result.extended);
     assert_eq!(result.new_highest.amount, Money::from_cents(10_00));
-    assert_eq!(auction.current_highest().unwrap().amount, Money::from_cents(10_00));
+    assert_eq!(
+        auction.current_highest().unwrap().amount,
+        Money::from_cents(10_00)
+    );
     assert_eq!(auction.status(), AuctionStatus::Active);
 }
 
@@ -126,9 +129,14 @@ fn accept_outbid_and_return_previous_bid() {
         )
         .expect("second bid should be accepted");
 
-    let previous = result.previous_highest.expect("previous bid should be returned");
+    let previous = result
+        .previous_highest
+        .expect("previous bid should be returned");
     assert_eq!(previous.bidder_id, UserId::new("user-1"));
-    assert_eq!(auction.current_highest().unwrap().bidder_id, UserId::new("user-2"));
+    assert_eq!(
+        auction.current_highest().unwrap().bidder_id,
+        UserId::new("user-2")
+    );
 }
 
 #[test]
@@ -150,7 +158,10 @@ fn reject_self_bidding() {
         UnixSeconds::new(20),
     );
 
-    assert!(matches!(result, Err(BidError::SelfBiddingNotAllowed { .. })));
+    assert!(matches!(
+        result,
+        Err(BidError::SelfBiddingNotAllowed { .. })
+    ));
 }
 
 #[test]

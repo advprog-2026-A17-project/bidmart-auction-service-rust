@@ -1,12 +1,16 @@
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use uuid::Uuid;
 
-use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord, NewOutboxEventRecord};
-use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
+use bidmart_auction_service_rust::persistence::models::{
+    NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+};
+use bidmart_auction_service_rust::persistence::repositories::{
+    AuctionRepository, BidRepository, OutboxRepository,
+};
 
-async fn setup_test_db() -> SqlitePool {
+async fn setup_test_db() -> AnyPool {
     // Use in-memory SQLite database
-    let pool = SqlitePool::connect("sqlite::memory:")
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -16,7 +20,7 @@ async fn setup_test_db() -> SqlitePool {
             .join("migrations/20260428000000_init.sql"),
     )
     .expect("read migration");
-    
+
     // Split and execute each statement
     for statement in sql.split(';') {
         let trimmed = statement.trim();
@@ -88,7 +92,10 @@ async fn test_insert_and_list_bids() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo.insert(&new_auction).await.expect("insert auction");
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
 
     // Insert bids
     let bid1_id = Uuid::new_v4().to_string();
@@ -232,10 +239,7 @@ async fn test_outbox_insert_list_and_mark_published() {
         .expect("insert event 2");
 
     // List pending events (should be in created_at order)
-    let pending = outbox_repo
-        .list_pending(10)
-        .await
-        .expect("list pending");
+    let pending = outbox_repo.list_pending(10).await.expect("list pending");
     assert_eq!(pending.len(), 2);
     assert_eq!(pending[0].id, event_id1); // First inserted
     assert_eq!(pending[1].id, event_id2); // Second inserted

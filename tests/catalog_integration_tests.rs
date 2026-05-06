@@ -1,10 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::AnyPool;
 
-use bidmart_auction_service_rust::client::{
-    CatalogClient, CatalogClientError, ListingSummary,
-};
+use bidmart_auction_service_rust::client::{CatalogClient, CatalogClientError, ListingSummary};
 use bidmart_auction_service_rust::persistence::repositories::{
     AuctionRepository, BidRepository, OutboxRepository,
 };
@@ -39,10 +37,8 @@ impl CatalogClient for MockCatalogClient {
     }
 }
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -109,8 +105,19 @@ async fn create_auction_rejects_inactive_catalog_listing() {
     let result = service.create_auction(command).await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Listing is not active"));
-    assert!(auction_repo.list_all().await.expect("list auctions").is_empty());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Listing is not active")
+    );
+    assert!(
+        auction_repo
+            .list_all()
+            .await
+            .expect("list auctions")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -126,11 +133,19 @@ async fn create_auction_rejects_catalog_seller_mismatch() {
     let result = service.create_auction(command).await;
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("Listing seller does not match auction seller"));
-    assert!(auction_repo.list_all().await.expect("list auctions").is_empty());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Listing seller does not match auction seller")
+    );
+    assert!(
+        auction_repo
+            .list_all()
+            .await
+            .expect("list auctions")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -150,7 +165,10 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
 
     assert_eq!(auction.listing_id, command.listing_id);
     assert_eq!(auction.seller_id, command.seller_id);
-    assert_eq!(auction_repo.list_all().await.expect("list auctions").len(), 1);
+    assert_eq!(
+        auction_repo.list_all().await.expect("list auctions").len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -174,14 +192,26 @@ async fn place_bid_rejects_inactive_catalog_listing() {
     });
 
     let result = service
-        .place_bid_and_persist(&auction.id, "bidder-catalog-1", 1500, auction.start_time + 10)
+        .place_bid_and_persist(
+            &auction.id,
+            "bidder-catalog-1",
+            1500,
+            auction.start_time + 10,
+        )
         .await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Listing is not active"));
-    assert!(service
-        .list_bids(&auction.id)
-        .await
-        .expect("list bids")
-        .is_empty());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Listing is not active")
+    );
+    assert!(
+        service
+            .list_bids(&auction.id)
+            .await
+            .expect("list bids")
+            .is_empty()
+    );
 }

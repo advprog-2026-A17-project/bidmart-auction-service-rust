@@ -1,20 +1,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::AnyPool;
 
+use axum::{Json, Router, extract::State, routing::post};
 use bidmart_auction_service_rust::persistence::models::{NewOutboxEventRecord, OutboxEventRecord};
 use bidmart_auction_service_rust::persistence::repositories::OutboxRepository;
 use bidmart_auction_service_rust::scheduler::outbox_scheduler::{
     HttpOutboxPublisher, OutboxPublishError, OutboxScheduler,
 };
-use axum::{extract::State, routing::post, Json, Router};
 use serde_json::Value;
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -194,8 +192,8 @@ async fn http_outbox_publisher_posts_event_to_relay_transport() {
         axum::serve(listener, app).await.expect("serve relay");
     });
 
-    let publisher = HttpOutboxPublisher::new(format!("http://{address}"), "/events")
-        .expect("create publisher");
+    let publisher =
+        HttpOutboxPublisher::new(format!("http://{address}"), "/events").expect("create publisher");
     publisher
         .publish(NewOutboxEventRecord {
             id: "event-http".to_string(),

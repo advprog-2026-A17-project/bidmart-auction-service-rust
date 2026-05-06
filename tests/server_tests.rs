@@ -1,16 +1,14 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::AnyPool;
 use tower::ServiceExt;
 
 use bidmart_auction_service_rust::server::{
     build_router, catalog_client_from_url, wallet_client_from_url,
 };
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use bidmart_auction_service_rust::client::{
     HoldFundsRequest, HoldResponse, WalletClient, WalletClientError,
@@ -26,7 +26,7 @@ impl WalletClient for DelayingWalletClient {
         }
 
         Ok(HoldResponse {
-            id: request.hold_id, 
+            id: request.hold_id,
             status: "ACTIVE".to_string(),
             amount: request.amount,
         })
@@ -41,8 +41,8 @@ impl WalletClient for DelayingWalletClient {
     }
 }
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePool::connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 

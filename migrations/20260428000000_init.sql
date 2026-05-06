@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     aggregate_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
-    published INTEGER NOT NULL,
+    published BOOLEAN NOT NULL,
     published_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL

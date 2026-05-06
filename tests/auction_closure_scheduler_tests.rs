@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
@@ -7,8 +7,8 @@ use bidmart_auction_service_rust::persistence::repositories::{
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::AuctionClosureScheduler;
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePool::connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 

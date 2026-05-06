@@ -1,12 +1,14 @@
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use uuid::Uuid;
 
 use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord};
-use bidmart_auction_service_rust::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
+use bidmart_auction_service_rust::persistence::repositories::{
+    AuctionRepository, BidRepository, OutboxRepository,
+};
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
-async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePool::connect("sqlite::memory:")
+async fn setup_test_db() -> AnyPool {
+    let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
         .expect("connect to in-memory db");
 
@@ -63,12 +65,7 @@ async fn test_service_place_bid() {
 
     // Place bid via service
     let result = service
-        .place_bid_and_persist(
-            &auction_id,
-            "user-1",
-            1500,
-            now + 10,
-        )
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
         .await;
 
     assert!(result.is_ok());
@@ -82,10 +79,7 @@ async fn test_service_place_bid() {
     assert_eq!(bids[0].bid_amount_cents, 1500);
 
     // Verify event was published to outbox
-    let events = outbox_repo
-        .list_pending(10)
-        .await
-        .expect("list outbox");
+    let events = outbox_repo.list_pending(10).await.expect("list outbox");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "BidPlaced");
     assert!(events[0].payload.contains("\"listing_id\":\"listing-1\""));
@@ -150,12 +144,7 @@ async fn test_service_place_bid_on_nonexistent_auction() {
     let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
 
     let result = service
-        .place_bid_and_persist(
-            "nonexistent-auction",
-            "user-1",
-            1500,
-            1_700_000_010i64,
-        )
+        .place_bid_and_persist("nonexistent-auction", "user-1", 1500, 1_700_000_010i64)
         .await;
 
     assert!(result.is_err());
@@ -433,5 +422,9 @@ async fn close_auction_publishes_auction_ended_outbox_event() {
     assert_eq!(events[0].aggregate_id, auction_id);
     assert_eq!(events[0].event_type, "AuctionEnded");
     assert!(events[0].payload.contains("\"status\":\"WON\""));
-    assert!(events[0].payload.contains("\"winner_bidder_id\":\"winner\""));
+    assert!(
+        events[0]
+            .payload
+            .contains("\"winner_bidder_id\":\"winner\"")
+    );
 }

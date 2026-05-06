@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
@@ -12,20 +12,34 @@ use bidmart_auction_service_rust::client::{HoldFundsRequest, HttpWalletClient, W
 #[derive(Clone)]
 struct WalletState {
     hold_requests: Arc<Mutex<Vec<Value>>>,
+    internal_tokens: Arc<Mutex<Vec<Option<String>>>>,
 }
 
 #[tokio::test]
 async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     let state = WalletState {
         hold_requests: Arc::new(Mutex::new(Vec::new())),
+        internal_tokens: Arc::new(Mutex::new(Vec::new())),
     };
     let captured_requests = state.hold_requests.clone();
+    let captured_tokens = state.internal_tokens.clone();
 
     let app = Router::new()
         .route(
             "/api/v1/wallet/hold",
             post(
-                |State(state): State<WalletState>, Json(payload): Json<Value>| async move {
+                |State(state): State<WalletState>,
+                 headers: HeaderMap,
+                 Json(payload): Json<Value>| async move {
+                    let internal_token = headers
+                        .get("x-internal-service-token")
+                        .and_then(|value| value.to_str().ok())
+                        .map(ToOwned::to_owned);
+                    state
+                        .internal_tokens
+                        .lock()
+                        .expect("lock internal tokens")
+                        .push(internal_token);
                     state
                         .hold_requests
                         .lock()
@@ -81,4 +95,7 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     assert_eq!(requests[0]["bidId"], json!("bid-http-1"));
     assert_eq!(requests[0]["amount"], json!(1550));
     assert_eq!(requests[0]["expiresAt"], json!("2026-12-31T23:59:59Z"));
+
+    let tokens = captured_tokens.lock().expect("lock captured tokens");
+    assert_eq!(tokens.as_slice(), &[Some("bidmart-local-internal-token".to_string())]);
 }

@@ -445,7 +445,7 @@ impl AuctionService {
             .await
             .map_err(|error| error.to_string())?;
 
-        if !listing.status.eq_ignore_ascii_case("ACTIVE") {
+        if !is_catalog_listing_biddable(&listing.status) {
             return Err("Listing is not active".to_string());
         }
 
@@ -611,6 +611,10 @@ fn initial_status(start_time: i64, now: i64) -> String {
     } else {
         "ACTIVE".to_string()
     }
+}
+
+fn is_catalog_listing_biddable(status: &str) -> bool {
+    status.eq_ignore_ascii_case("ACTIVE") || status.eq_ignore_ascii_case("AUCTION_CREATED")
 }
 
 #[derive(Debug, Error)]

@@ -16,7 +16,7 @@ pub fn default_database_url() -> String {
     "postgresql://postgres:postgres@localhost:5432/bidmart_auction".to_string()
 }
 
-pub fn build_router(pool: AnyPool) -> Router {
+pub fn build_router(pool: AnyPool) -> (Router, AuctionService) {
     let auction_repo = AuctionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
@@ -34,7 +34,7 @@ pub fn build_router(pool: AnyPool) -> Router {
         catalog_client,
     );
 
-    create_router(auction_service)
+    (create_router(auction_service.clone()), auction_service)
 }
 
 pub fn catalog_client_from_url(

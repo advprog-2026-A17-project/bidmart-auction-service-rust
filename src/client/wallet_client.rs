@@ -3,6 +3,8 @@ use thiserror::Error;
 
 use crate::client::http_service_client::{HttpServiceClient, HttpServiceClientError};
 
+const DEFAULT_INTERNAL_SERVICE_TOKEN: &str = "bidmart-local-internal-token";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HoldFundsRequest {
@@ -61,8 +63,11 @@ pub struct HttpWalletClient {
 
 impl HttpWalletClient {
     pub fn new(base_url: impl AsRef<str>) -> Result<Self, WalletClientError> {
+        let internal_service_token = std::env::var("GATEWAY_INTERNAL_TOKEN")
+            .unwrap_or_else(|_| DEFAULT_INTERNAL_SERVICE_TOKEN.to_string());
         let client = HttpServiceClient::new(base_url, "wallet")
-            .map_err(WalletClientError::from_http_error)?;
+            .map_err(WalletClientError::from_http_error)?
+            .with_internal_service_token(internal_service_token);
         Ok(Self { client })
     }
 }

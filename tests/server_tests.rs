@@ -34,7 +34,7 @@ async fn setup_test_db() -> AnyPool {
 #[tokio::test]
 async fn build_router_wires_service_repositories_into_http_app() {
     let pool = setup_test_db().await;
-    let app = build_router(pool);
+    let (app, _) = build_router(pool);
 
     let response = app
         .oneshot(

@@ -484,14 +484,14 @@ impl AuctionService {
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({
-            "auction_id": auction.id,
-            "listing_id": auction.listing_id,
-            "bid_id": bid.id,
-            "bidder_id": bid.bidder_id,
-            "amount_cents": bid.bid_amount_cents,
-            "current_price_cents": bid.bid_amount_cents,
-            "bid_time": bid.bid_time,
-            "placed_at": now
+            "auctionId": auction.id,
+            "listingId": auction.listing_id,
+            "bidId": bid.id,
+            "bidderId": bid.bidder_id,
+            "amountCents": bid.bid_amount_cents,
+            "currentPrice": bid.bid_amount_cents,
+            "bidTime": bid.bid_time,
+            "placedAt": now
         })
         .to_string();
         let event = NewOutboxEventRecord {
@@ -515,13 +515,13 @@ impl AuctionService {
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({
-            "auction_id": auction.id,
-            "listing_id": auction.listing_id,
-            "seller_id": auction.seller_id,
+            "auctionId": auction.id,
+            "listingId": auction.listing_id,
+            "sellerId": auction.seller_id,
             "status": auction.status,
-            "winner_bidder_id": winning_bid.map(|bid| bid.bidder_id.as_str()),
-            "winning_bid_cents": winning_bid.map(|bid| bid.bid_amount_cents),
-            "ended_at": now
+            "winnerId": winning_bid.map(|bid| bid.bidder_id.as_str()),
+            "finalPrice": winning_bid.map(|bid| bid.bid_amount_cents),
+            "endedAt": now
         })
         .to_string();
         let event = NewOutboxEventRecord {

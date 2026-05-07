@@ -10,6 +10,7 @@ use tokio::net::TcpStream;
 pub(crate) struct HttpServiceClient {
     base_url: url::Url,
     service_name: &'static str,
+    internal_service_token: Option<String>,
 }
 
 impl HttpServiceClient {
@@ -29,7 +30,16 @@ impl HttpServiceClient {
         Ok(Self {
             base_url,
             service_name,
+            internal_service_token: None,
         })
+    }
+
+    pub(crate) fn with_internal_service_token(mut self, token: impl Into<String>) -> Self {
+        let token = token.into();
+        if !token.trim().is_empty() {
+            self.internal_service_token = Some(token);
+        }
+        self
     }
 
     pub(crate) async fn get(
@@ -93,6 +103,9 @@ impl HttpServiceClient {
 
         if let Some(content_type) = content_type {
             request = request.header("content-type", content_type);
+        }
+        if let Some(internal_service_token) = &self.internal_service_token {
+            request = request.header("x-internal-service-token", internal_service_token);
         }
 
         let request = request

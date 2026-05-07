@@ -82,8 +82,8 @@ async fn test_service_place_bid() {
     let events = outbox_repo.list_pending(10).await.expect("list outbox");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "BidPlaced");
-    assert!(events[0].payload.contains("\"listing_id\":\"listing-1\""));
-    assert!(events[0].payload.contains("\"current_price_cents\":1500"));
+    assert!(events[0].payload.contains("\"listingId\":\"listing-1\""));
+    assert!(events[0].payload.contains("\"amountCents\":1500"));
 }
 
 #[tokio::test]
@@ -425,6 +425,6 @@ async fn close_auction_publishes_auction_ended_outbox_event() {
     assert!(
         events[0]
             .payload
-            .contains("\"winner_bidder_id\":\"winner\"")
+            .contains("\"winnerId\":\"winner\"")
     );
 }

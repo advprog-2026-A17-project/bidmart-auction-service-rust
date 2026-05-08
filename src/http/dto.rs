@@ -23,14 +23,10 @@ pub struct CreateAuctionRequest {
     pub minimum_increment_cents: Option<i64>,
     #[serde(default, rename = "minimumIncrement")]
     pub minimum_increment: Option<f64>,
-    #[serde(default)]
-    pub start_time: Option<i64>,
-    #[serde(default, rename = "startTime")]
-    pub start_time_api: Option<String>,
-    #[serde(default)]
-    pub end_time: Option<i64>,
-    #[serde(default, rename = "endTime")]
-    pub end_time_api: Option<String>,
+    #[serde(default, alias = "startTime")]
+    pub start_time: Option<RequestTimestamp>,
+    #[serde(default, alias = "endTime")]
+    pub end_time: Option<RequestTimestamp>,
 }
 
 impl CreateAuctionRequest {
@@ -55,10 +51,17 @@ impl CreateAuctionRequest {
                 .minimum_increment_cents
                 .or_else(|| self.minimum_increment.map(decimal_to_cents))
                 .ok_or_else(|| "minimum_increment is required".to_string())?,
-            start_time: resolve_unix_seconds(self.start_time, self.start_time_api, "start_time")?,
-            end_time: resolve_unix_seconds(self.end_time, self.end_time_api, "end_time")?,
+            start_time: resolve_unix_seconds(self.start_time, "start_time")?,
+            end_time: resolve_unix_seconds(self.end_time, "end_time")?,
         })
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RequestTimestamp {
+    UnixSeconds(i64),
+    Rfc3339(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -233,19 +236,13 @@ fn validate_auction_type(auction_type: Option<&str>) -> Result<(), String> {
     ))
 }
 
-fn resolve_unix_seconds(
-    unix_seconds: Option<i64>,
-    rfc3339: Option<String>,
-    field: &str,
-) -> Result<i64, String> {
-    if let Some(value) = unix_seconds {
-        return Ok(value);
+fn resolve_unix_seconds(value: Option<RequestTimestamp>, field: &str) -> Result<i64, String> {
+    match value.ok_or_else(|| format!("{field} is required"))? {
+        RequestTimestamp::UnixSeconds(seconds) => Ok(seconds),
+        RequestTimestamp::Rfc3339(value) => chrono::DateTime::parse_from_rfc3339(&value)
+            .map(|datetime| datetime.timestamp())
+            .map_err(|_| format!("{field} must be unix seconds or RFC3339")),
     }
-
-    let value = rfc3339.ok_or_else(|| format!("{field} is required"))?;
-    chrono::DateTime::parse_from_rfc3339(&value)
-        .map(|datetime| datetime.timestamp())
-        .map_err(|_| format!("{field} must be unix seconds or RFC3339"))
 }
 
 fn unix_seconds_to_rfc3339(seconds: i64) -> String {

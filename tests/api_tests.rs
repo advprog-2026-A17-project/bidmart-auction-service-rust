@@ -220,6 +220,58 @@ async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
 }
 
 #[tokio::test]
+async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    let request_body = json!({
+        "listingId": "listing-create-frontend",
+        "sellerId": "seller-create-frontend",
+        "auctionType": "ENGLISH",
+        "startingPrice": 25.5,
+        "reservePrice": 50.0,
+        "minimumIncrement": 2.5,
+        "startTime": now - 60,
+        "endTime": now + 600
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auctions")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    let auction_id = response_body["id"]
+        .as_str()
+        .expect("response has auction id");
+
+    let persisted = auction_repo
+        .find_by_id(auction_id)
+        .await
+        .expect("find persisted auction")
+        .expect("auction persisted");
+    assert_eq!(persisted.start_time, now - 60);
+    assert_eq!(persisted.end_time, now + 600);
+}
+
+#[tokio::test]
 async fn get_auction_by_id_returns_auction_response() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

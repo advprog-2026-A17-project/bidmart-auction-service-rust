@@ -294,18 +294,16 @@ impl AuctionService {
             )
             .map_err(PlaceBidError::BidError)?;
 
+        let bid_id = uuid::Uuid::new_v4().to_string();
+
         // Hold funds from wallet (blocking operation, part of critical path)
         let hold_id = if let Some(wallet_client) = &self.wallet_client {
             let hold_request = HoldFundsRequest {
                 user_id: bidder_id.to_string(),
                 hold_id: uuid::Uuid::new_v4().to_string(),
                 auction_id: auction_id.to_string(),
-                // Jika bid_id sudah digenerate di atas baris ini, gunakan variabelnya.
-                // Jika belum, kita generate baru:
-                bid_id: uuid::Uuid::new_v4().to_string(),
-                amount: bid_amount_cents as u64, // Ubah ke u64 sesuai DTO baru
-                // Idealnya expires_at ini diisi dengan waktu tutup lelang + buffer waktu.
-                // Untuk sementara kita hardcode agar tidak error:
+                bid_id: bid_id.clone(),
+                amount: bid_amount_cents as u64,
                 expires_at: "2026-12-31T23:59:59Z".to_string(),
             };
 
@@ -321,17 +319,25 @@ impl AuctionService {
 
         // Persist the bid
         let bid_record = NewBidRecord {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: bid_id,
             auction_id: auction_id.to_string(),
             bidder_id: bidder_id.to_string(),
             bid_amount_cents,
             bid_time,
         };
-        let inserted_bid = self
+        let inserted_bid = match self
             .bid_repo
             .insert_with_wallet_hold(&bid_record, hold_id.as_deref())
             .await
-            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+        {
+            Ok(inserted_bid) => inserted_bid,
+            Err(error) => {
+                if let (Some(wallet_client), Some(hold_id)) = (&self.wallet_client, hold_id.as_deref()) {
+                    let _ = wallet_client.release_hold(hold_id).await;
+                }
+                return Err(PlaceBidError::DatabaseError(error.to_string()));
+            }
+        };
 
         if let (Some(wallet_client), Some(previous_hold_id)) = (
             &self.wallet_client,

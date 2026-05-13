@@ -114,7 +114,12 @@ async fn place_bid(
 
     let bid = state
         .auction_service
-        .place_bid_and_persist(&auction_id, &bidder_id, bid_amount_cents, request.bid_time())
+        .place_bid_and_persist(
+            &auction_id,
+            &bidder_id,
+            bid_amount_cents,
+            request.bid_time(),
+        )
         .await?;
 
     Ok((StatusCode::CREATED, Json(bid.into())))

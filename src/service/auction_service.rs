@@ -332,7 +332,9 @@ impl AuctionService {
         {
             Ok(inserted_bid) => inserted_bid,
             Err(error) => {
-                if let (Some(wallet_client), Some(hold_id)) = (&self.wallet_client, hold_id.as_deref()) {
+                if let (Some(wallet_client), Some(hold_id)) =
+                    (&self.wallet_client, hold_id.as_deref())
+                {
                     let _ = wallet_client.release_hold(hold_id).await;
                 }
                 return Err(PlaceBidError::DatabaseError(error.to_string()));

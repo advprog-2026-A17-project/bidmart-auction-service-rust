@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -47,8 +47,10 @@ pub fn create_router(auction_service: AuctionService) -> Router {
 
 async fn create_auction(
     State(state): State<AppState>,
-    Json(request): Json<CreateAuctionRequest>,
+    headers: HeaderMap,
+    Json(mut request): Json<CreateAuctionRequest>,
 ) -> Result<(StatusCode, Json<AuctionResponse>), ApiError> {
+    apply_trusted_user_id(&headers, &mut request.seller_id, "seller_id")?;
     let command = request.try_into_command().map_err(ApiError::bad_request)?;
     let auction = state.auction_service.create_auction(command).await?;
     Ok((StatusCode::CREATED, Json(auction.into())))
@@ -102,18 +104,22 @@ async fn close_auction(
 async fn place_bid(
     State(state): State<AppState>,
     Path(auction_id): Path<String>,
+    headers: HeaderMap,
     Json(request): Json<PlaceBidRequest>,
 ) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
-    let bidder_id = request
-        .bidder_id()
-        .ok_or_else(|| ApiError::bad_request("bidder_id is required"))?;
+    let bidder_id = resolve_trusted_user_id(&headers, request.bidder_id(), "bidder_id")?;
     let bid_amount_cents = request
         .bid_amount_cents()
         .ok_or_else(|| ApiError::bad_request("bid_amount is required"))?;
 
     let bid = state
         .auction_service
-        .place_bid_and_persist(&auction_id, bidder_id, bid_amount_cents, request.bid_time())
+        .place_bid_and_persist(
+            &auction_id,
+            &bidder_id,
+            bid_amount_cents,
+            request.bid_time(),
+        )
         .await?;
 
     Ok((StatusCode::CREATED, Json(bid.into())))
@@ -149,6 +155,53 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
+}
+
+fn apply_trusted_user_id(
+    headers: &HeaderMap,
+    request_user_id: &mut Option<String>,
+    field_name: &str,
+) -> Result<(), ApiError> {
+    let Some(trusted_user_id) = trusted_user_id(headers) else {
+        return Ok(());
+    };
+
+    if let Some(body_user_id) = request_user_id.as_deref().filter(|value| !value.is_empty()) {
+        if body_user_id != trusted_user_id {
+            return Err(ApiError::forbidden(format!(
+                "{field_name} does not match authenticated user"
+            )));
+        }
+    }
+
+    *request_user_id = Some(trusted_user_id);
+    Ok(())
+}
+
+fn resolve_trusted_user_id(
+    headers: &HeaderMap,
+    request_user_id: Option<&str>,
+    field_name: &str,
+) -> Result<String, ApiError> {
+    let mut resolved = request_user_id.map(str::to_string);
+    apply_trusted_user_id(headers, &mut resolved, field_name)?;
+    resolved.ok_or_else(|| ApiError::bad_request(format!("{field_name} is required")))
+}
+
+fn trusted_user_id(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-user-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 impl From<CreateAuctionError> for ApiError {

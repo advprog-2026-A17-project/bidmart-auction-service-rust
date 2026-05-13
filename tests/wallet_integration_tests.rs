@@ -15,6 +15,7 @@ pub struct MockWalletClient {
     released_holds: Arc<Mutex<Vec<String>>>,
     converted_holds: Arc<Mutex<Vec<String>>>,
     fail_next_hold: Arc<Mutex<bool>>,
+    drop_bids_on_hold: Arc<Mutex<Option<AnyPool>>>,
 }
 
 impl MockWalletClient {
@@ -24,11 +25,16 @@ impl MockWalletClient {
             released_holds: Arc::new(Mutex::new(Vec::new())),
             converted_holds: Arc::new(Mutex::new(Vec::new())),
             fail_next_hold: Arc::new(Mutex::new(false)),
+            drop_bids_on_hold: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn set_fail_next_hold(&self) {
         *self.fail_next_hold.lock().unwrap() = true;
+    }
+
+    pub fn set_drop_bids_on_hold(&self, pool: AnyPool) {
+        *self.drop_bids_on_hold.lock().unwrap() = Some(pool);
     }
 
     pub fn get_holds(&self) -> Vec<HoldFundsRequest> {
@@ -63,6 +69,13 @@ impl WalletClient for MockWalletClient {
         };
 
         self.holds.lock().unwrap().push(request);
+        let drop_pool = self.drop_bids_on_hold.lock().unwrap().clone();
+        if let Some(pool) = drop_pool {
+            sqlx::query("DROP TABLE bids")
+                .execute(&pool)
+                .await
+                .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
+        }
         Ok(response)
     }
 
@@ -149,13 +162,59 @@ async fn test_place_bid_holds_funds_from_wallet() {
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
         .await;
 
-    assert!(result.is_ok());
+    let bid = result.expect("bid should be placed");
 
     // Verify wallet was called to hold funds
     let holds = wallet_client.get_holds();
     assert_eq!(holds.len(), 1);
     assert_eq!(holds[0].user_id, "user-1");
+    assert_eq!(holds[0].bid_id, bid.id);
     assert_eq!(holds[0].amount, 1500);
+}
+
+#[tokio::test]
+async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool.clone());
+
+    let wallet_client = Arc::new(MockWalletClient::new());
+    wallet_client.set_drop_bids_on_hold(pool);
+
+    let service = AuctionService::new_with_wallet(
+        auction_repo.clone(),
+        bid_repo,
+        outbox_repo,
+        wallet_client.clone(),
+    );
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-compensation".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time: now + 300,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    let result = service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
+        .await;
+
+    assert!(result.is_err());
+    assert!(wallet_client.get_holds().is_empty());
+    assert_eq!(wallet_client.get_released_holds().len(), 1);
 }
 
 #[tokio::test]

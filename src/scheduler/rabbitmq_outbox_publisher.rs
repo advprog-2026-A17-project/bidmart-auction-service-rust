@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use lapin::{
-    options::BasicPublishOptions, BasicProperties, Channel, Connection, ConnectionProperties,
+    BasicProperties, Channel, Connection, ConnectionProperties, options::BasicPublishOptions,
 };
 use tokio::sync::RwLock;
 
@@ -117,10 +117,13 @@ impl RabbitMqOutboxPublisher {
     /// Return a closure suitable for `OutboxScheduler::spawn_polling`.
     pub fn publisher_fn(
         &self,
-    ) -> impl Fn(OutboxEventRecord) -> Pin<Box<dyn std::future::Future<Output = Result<(), OutboxPublishError>> + Send>>
-           + Clone
-           + Send
-           + 'static {
+    ) -> impl Fn(
+        OutboxEventRecord,
+    )
+        -> Pin<Box<dyn std::future::Future<Output = Result<(), OutboxPublishError>> + Send>>
+    + Clone
+    + Send
+    + 'static {
         let this = self.clone();
         move |event: OutboxEventRecord| {
             let publisher = this.clone();

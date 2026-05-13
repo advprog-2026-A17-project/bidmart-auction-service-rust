@@ -1,10 +1,10 @@
-use bidmart_auction_service_rust::server::{
-    build_router, connect_pool, default_database_url, run_migrations,
-};
 use bidmart_auction_service_rust::persistence::repositories::OutboxRepository;
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::AuctionClosureScheduler;
 use bidmart_auction_service_rust::scheduler::outbox_scheduler::OutboxScheduler;
 use bidmart_auction_service_rust::scheduler::rabbitmq_outbox_publisher::RabbitMqOutboxPublisher;
+use bidmart_auction_service_rust::server::{
+    build_router, connect_pool, default_database_url, run_migrations,
+};
 use dotenvy::from_path;
 use std::env;
 use std::time::Duration;
@@ -32,8 +32,8 @@ async fn main() -> anyhow::Result<()> {
     let _scheduler_handle = scheduler.spawn_polling(Duration::from_millis(scheduler_interval_ms));
 
     // Outbox scheduler → RabbitMQ (publishes domain events to the notification service)
-    let rabbitmq_url =
-        env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string());
+    let rabbitmq_url = env::var("RABBITMQ_URL")
+        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string());
     let exchange =
         env::var("BIDMART_EVENTS_EXCHANGE").unwrap_or_else(|_| "bidmart.events".to_string());
     let outbox_interval_ms: u64 = env::var("OUTBOX_SCHEDULER_INTERVAL_MS")
@@ -55,4 +55,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -422,9 +422,5 @@ async fn close_auction_publishes_auction_ended_outbox_event() {
     assert_eq!(events[0].aggregate_id, auction_id);
     assert_eq!(events[0].event_type, "AuctionEnded");
     assert!(events[0].payload.contains("\"status\":\"WON\""));
-    assert!(
-        events[0]
-            .payload
-            .contains("\"winnerId\":\"winner\"")
-    );
+    assert!(events[0].payload.contains("\"winnerId\":\"winner\""));
 }

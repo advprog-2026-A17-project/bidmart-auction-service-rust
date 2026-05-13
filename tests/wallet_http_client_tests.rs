@@ -97,5 +97,8 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     assert_eq!(requests[0]["expiresAt"], json!("2026-12-31T23:59:59Z"));
 
     let tokens = captured_tokens.lock().expect("lock captured tokens");
-    assert_eq!(tokens.as_slice(), &[Some("bidmart-local-internal-token".to_string())]);
+    assert_eq!(
+        tokens.as_slice(),
+        &[Some("bidmart-local-internal-token".to_string())]
+    );
 }

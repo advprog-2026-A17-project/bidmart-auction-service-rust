@@ -112,10 +112,15 @@ impl AuctionService {
             updated_at: now,
         };
 
-        self.auction_repo
+        let inserted = self
+            .auction_repo
             .insert(&auction)
             .await
-            .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))
+            .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))?;
+        self.publish_auction_created_event(&inserted)
+            .await
+            .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))?;
+        Ok(inserted)
     }
 
     async fn validate_listing_for_auction(
@@ -506,6 +511,38 @@ impl AuctionService {
             id: uuid::Uuid::new_v4().to_string(),
             aggregate_id: auction.id.clone(),
             event_type: "BidPlaced".to_string(),
+            payload,
+            published: false,
+            published_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.outbox_repo.insert(&event).await?;
+        Ok(())
+    }
+
+    async fn publish_auction_created_event(
+        &self,
+        auction: &AuctionRecord,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({
+            "auctionId": auction.id,
+            "listingId": auction.listing_id,
+            "sellerId": auction.seller_id,
+            "startingPrice": auction.starting_price_cents,
+            "reservePrice": auction.reserve_price_cents,
+            "minimumIncrement": auction.minimum_increment_cents,
+            "status": auction.status,
+            "startTime": auction.start_time,
+            "endTime": auction.end_time,
+            "createdAt": now
+        })
+        .to_string();
+        let event = NewOutboxEventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            aggregate_id: auction.id.clone(),
+            event_type: "AuctionCreated".to_string(),
             payload,
             published: false,
             published_at: None,

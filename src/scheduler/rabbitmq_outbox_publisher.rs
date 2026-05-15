@@ -136,6 +136,7 @@ impl RabbitMqOutboxPublisher {
 /// expected by the notification/order service.
 fn event_type_to_routing_key(event_type: &str) -> String {
     match event_type {
+        "AuctionCreated" => "auction.created.v1".to_string(),
         "AuctionEnded" => "auction.ended.v1".to_string(),
         "BidPlaced" => "auction.bid-placed.v1".to_string(),
         "Outbid" => "auction.outbid.v1".to_string(),

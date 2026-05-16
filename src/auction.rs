@@ -325,6 +325,22 @@ impl Auction {
         })
     }
 
+    pub fn place_proxy_bid(
+        &mut self,
+        bidder_id: UserId,
+        max_amount: Money,
+        now: UnixSeconds,
+    ) -> Result<BidAccepted, BidError> {
+        let minimum_required = self.minimum_required_bid();
+        if max_amount < minimum_required {
+            return Err(BidError::BidTooLow {
+                minimum: minimum_required,
+            });
+        }
+
+        self.place_bid(bidder_id, minimum_required, now)
+    }
+
     fn minimum_required_bid(&self) -> Money {
         match &self.current_highest {
             Some(bid) => bid.amount + self.minimum_increment,

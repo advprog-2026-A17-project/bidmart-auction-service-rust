@@ -67,6 +67,7 @@ fn create_command() -> CreateAuctionCommand {
     CreateAuctionCommand {
         listing_id: "listing-catalog-1".to_string(),
         seller_id: "seller-catalog-1".to_string(),
+        auction_type: "ENGLISH".to_string(),
         starting_price_cents: 1000,
         reserve_price_cents: 5000,
         minimum_increment_cents: 200,

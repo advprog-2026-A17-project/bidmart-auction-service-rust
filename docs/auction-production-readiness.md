@@ -69,6 +69,22 @@ Recommended scenario:
 
 Recommended tools are k6 for HTTP-level tests and a Tokio-based internal harness for service-level stress tests.
 
+### Seeded Harness Baseline
+
+The repository now includes an ignored reproducible harness test:
+
+- `cargo test --test load_performance_harness_tests -- --ignored --nocapture`
+- Seed: `20260516`
+- Attempts: `300` concurrent bid commands
+- Local baseline (SQLite in-memory, MacBook dev machine):
+  - Accepted bids: `5`
+  - Persisted bids: `5`
+  - p50 latency: `39ms`
+  - p95 latency: `80ms`
+  - max latency: `84ms`
+
+These values are a reference point for regression tracking. Teams should publish updated baselines for PostgreSQL and containerized runtime before release.
+
 ## Domain Reconstruction
 
 The service reconstructs domain state from persisted auction rows plus the current winning bid. This is sufficient for the current lifecycle tests, but production should persist and restore every domain field that affects future decisions.
@@ -92,4 +108,4 @@ Recommended shape:
 - Multi-slot regional strategy for multiple winners.
 - Enterprise strategy where wallet fund holding can be optional or disabled.
 
-The service layer should select a strategy from persisted auction type metadata and keep wallet/outbox orchestration outside the strategy.
+The service now includes a first strategy registry for `ENGLISH`, `SCHOLARSHIP`, `MULTI_SLOT_REGIONAL`, and `ENTERPRISE` types. Non-English types are recognized but intentionally rejected as "not enabled yet" until their domain rules are implemented. This keeps API contracts and persistence ready while preventing partial behavior leaks.

@@ -153,6 +153,53 @@ async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
 }
 
 #[tokio::test]
+async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let now = chrono::Utc::now().timestamp();
+    let request_body = json!({
+        "listingId": "listing-future-type",
+        "sellerId": "seller-future-type",
+        "auctionType": "SCHOLARSHIP",
+        "startingPrice": 25.5,
+        "reservePrice": 50.0,
+        "minimumIncrement": 2.5,
+        "start_time": now - 60,
+        "end_time": now + 600
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auctions")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let response_body: Value = serde_json::from_slice(&body).expect("parse response json");
+    assert!(
+        response_body["message"]
+            .as_str()
+            .expect("message")
+            .contains("not enabled yet")
+    );
+}
+
+#[tokio::test]
 async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());
@@ -817,6 +864,104 @@ async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
 }
 
 #[tokio::test]
+async fn api_v1_place_bid_rejects_seller_bidding_own_auction() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-self-bid".to_string(),
+            seller_id: "seller-self-bid".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 120,
+            end_time: now + 900,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    let request_body = json!({
+        "bidderId": "seller-self-bid",
+        "bidAmount": 15.5
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn api_v1_place_proxy_bid_rejects_seller_bidding_own_auction() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-self-proxy".to_string(),
+            seller_id: "seller-self-proxy".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 120,
+            end_time: now + 900,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    let request_body = json!({
+        "bidderId": "seller-self-proxy",
+        "maxBidAmount": 50.0,
+        "bid_time": now + 20
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn list_bids_returns_bid_history_for_auction() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());
@@ -892,6 +1037,180 @@ async fn list_bids_returns_bid_history_for_auction() {
     assert_eq!(bids[1]["id"], json!(lower_bid.id));
     assert_eq!(bids[1]["bidder_id"], json!("bidder-low"));
     assert_eq!(bids[1]["bid_amount_cents"], json!(1500));
+}
+
+#[tokio::test]
+async fn list_bids_cursor_returns_paginated_bid_history() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-cursor".to_string(),
+        seller_id: "seller-cursor".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 100,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+
+    bid_repo
+        .insert(&NewBidRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-low".to_string(),
+            bid_amount_cents: 1100,
+            bid_time: now + 5,
+        })
+        .await
+        .expect("insert low");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-mid".to_string(),
+            bid_amount_cents: 1500,
+            bid_time: now + 10,
+        })
+        .await
+        .expect("insert mid");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-high".to_string(),
+            bid_amount_cents: 1900,
+            bid_time: now + 20,
+        })
+        .await
+        .expect("insert high");
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor?limit=2"))
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = to_bytes(first.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let first_json: Value = serde_json::from_slice(&first_body).expect("parse response json");
+    let first_items = first_json["items"].as_array().expect("items array");
+    assert_eq!(first_items.len(), 2);
+    assert_eq!(first_items[0]["bidder_id"], json!("bidder-high"));
+    assert_eq!(first_items[1]["bidder_id"], json!("bidder-mid"));
+
+    let cursor = first_json["nextCursor"]
+        .as_str()
+        .expect("next cursor")
+        .to_string();
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!(
+                    "/api/v1/auctions/{auction_id}/bids/cursor?limit=2&cursor={cursor}"
+                ))
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body = to_bytes(second.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let second_json: Value = serde_json::from_slice(&second_body).expect("parse response json");
+    let second_items = second_json["items"].as_array().expect("items array");
+    assert_eq!(second_items.len(), 1);
+    assert_eq!(second_items[0]["bidder_id"], json!("bidder-low"));
+    assert!(second_json["nextCursor"].is_null());
+}
+
+#[tokio::test]
+async fn place_proxy_bid_places_increment_over_current_winner() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    auction_repo
+        .insert(&NewAuctionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-proxy".to_string(),
+            seller_id: "seller-proxy".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: Some(2200),
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 120,
+            end_time: now + 900,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "existing-winner".to_string(),
+            bid_amount_cents: 2200,
+            bid_time: now + 5,
+        })
+        .await
+        .expect("insert winner");
+
+    let request_body = json!({
+        "bidderId": "proxy-bidder",
+        "maxBidAmount": 50.0,
+        "bid_time": now + 20
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let response_json: Value = serde_json::from_slice(&body).expect("parse response json");
+    assert_eq!(response_json["bidder_id"], json!("proxy-bidder"));
+    assert_eq!(response_json["bid_amount_cents"], json!(2400));
 }
 
 #[tokio::test]

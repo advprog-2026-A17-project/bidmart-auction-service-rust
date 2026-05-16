@@ -328,6 +328,41 @@ async fn test_place_bid_rejects_seller_bidding() {
 }
 
 #[tokio::test]
+async fn test_place_proxy_bid_rejects_seller_bidding() {
+    let pool = setup_test_db().await;
+    let auction_repo = AuctionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+
+    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    let new_auction = NewAuctionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-1".to_string(),
+        seller_id: "seller-1".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now,
+        end_time: now + 300,
+        created_at: now,
+        updated_at: now,
+    };
+    auction_repo.insert(&new_auction).await.expect("insert");
+
+    let result = service
+        .place_proxy_bid_and_persist(&auction_id, "seller-1", 10_000, now + 20)
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
 async fn test_place_bid_triggers_anti_sniping_extension() {
     let pool = setup_test_db().await;
     let auction_repo = AuctionRepository::new(pool.clone());

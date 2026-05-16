@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::http::dto::{
-    AuctionPageResponse, AuctionResponse, BidResponse, CreateAuctionRequest, ErrorResponse,
-    PlaceBidRequest,
+    AuctionPageResponse, AuctionResponse, BidCursorPageResponse, BidResponse, CreateAuctionRequest,
+    ErrorResponse, PlaceBidRequest, PlaceProxyBidRequest,
 };
 use crate::service::auction_service::{
     AuctionService, CloseAuctionError, CreateAuctionError, GetAuctionError, ListAuctionsError,
@@ -28,6 +28,10 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         .route("/auctions", get(list_auctions).post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
+        .route(
+            "/auctions/:auction_id/bids/cursor",
+            get(list_bids_cursor).post(place_proxy_bid),
+        )
         .route("/api/v1/auctions", get(list_auctions).post(create_auction))
         .route(
             "/api/v1/auctions/pending-closure",
@@ -41,6 +45,10 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         .route(
             "/api/v1/auctions/:auction_id/bids",
             get(list_bids).post(place_bid),
+        )
+        .route(
+            "/api/v1/auctions/:auction_id/bids/cursor",
+            get(list_bids_cursor).post(place_proxy_bid),
         )
         .with_state(state)
 }
@@ -133,6 +141,54 @@ async fn list_bids(
     let response = bids.into_iter().map(BidResponse::from).collect();
 
     Ok(Json(response))
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct BidCursorQuery {
+    cursor: Option<String>,
+    limit: Option<i64>,
+}
+
+async fn list_bids_cursor(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+    Query(query): Query<BidCursorQuery>,
+) -> Result<Json<BidCursorPageResponse>, ApiError> {
+    let page = state
+        .auction_service
+        .list_bids_with_cursor(&auction_id, query.cursor.as_deref(), query.limit)
+        .await?;
+    let items = page.items.into_iter().map(BidResponse::from).collect();
+
+    Ok(Json(BidCursorPageResponse {
+        items,
+        next_cursor: page.next_cursor,
+        size: page.size,
+    }))
+}
+
+async fn place_proxy_bid(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<PlaceProxyBidRequest>,
+) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
+    let bidder_id = resolve_trusted_user_id(&headers, request.bidder_id(), "bidder_id")?;
+    let max_bid_amount_cents = request
+        .max_bid_amount_cents()
+        .ok_or_else(|| ApiError::bad_request("max_bid_amount is required"))?;
+
+    let bid = state
+        .auction_service
+        .place_proxy_bid_and_persist(
+            &auction_id,
+            &bidder_id,
+            max_bid_amount_cents,
+            request.bid_time(),
+        )
+        .await?;
+
+    Ok((StatusCode::CREATED, Json(bid.into())))
 }
 
 #[derive(Debug)]
@@ -305,6 +361,10 @@ impl From<PlaceBidError> for ApiError {
 impl From<ListBidsError> for ApiError {
     fn from(error: ListBidsError) -> Self {
         match error {
+            ListBidsError::InvalidInput(message) => Self {
+                status: StatusCode::BAD_REQUEST,
+                message,
+            },
             ListBidsError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,

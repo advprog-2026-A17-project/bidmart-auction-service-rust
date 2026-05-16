@@ -144,6 +144,48 @@ impl BidRepository {
         .await
     }
 
+    pub async fn list_by_auction_cursor(
+        &self,
+        auction_id: &str,
+        cursor: Option<(i64, i64, String)>,
+        limit: i64,
+    ) -> Result<Vec<BidRecord>, sqlx::Error> {
+        match cursor {
+            Some((amount, bid_time, id)) => {
+                sqlx::query_as::<_, BidRecord>(
+                    "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+                     FROM bids \
+                     WHERE auction_id = $1 \
+                       AND (bid_amount_cents < $2 \
+                         OR (bid_amount_cents = $2 AND bid_time > $3) \
+                         OR (bid_amount_cents = $2 AND bid_time = $3 AND id > $4)) \
+                     ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC \
+                     LIMIT $5",
+                )
+                .bind(auction_id)
+                .bind(amount)
+                .bind(bid_time)
+                .bind(id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, BidRecord>(
+                    "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+                     FROM bids \
+                     WHERE auction_id = $1 \
+                     ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC \
+                     LIMIT $2",
+                )
+                .bind(auction_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+    }
+
     pub async fn find_winning_bid(
         &self,
         auction_id: &str,

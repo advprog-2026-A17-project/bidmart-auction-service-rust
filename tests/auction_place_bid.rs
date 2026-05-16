@@ -350,3 +350,49 @@ fn determine_unsold_when_no_bids() {
     let result = auction.determine_outcome();
     assert_eq!(result, AuctionOutcome::Unsold);
 }
+
+#[test]
+fn proxy_bid_places_minimum_valid_amount() {
+    let mut auction = sample_auction(0, 500);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(10),
+        )
+        .expect("seed bid accepted");
+
+    let result = auction
+        .place_proxy_bid(
+            UserId::new("user-2"),
+            Money::from_cents(20_00),
+            UnixSeconds::new(20),
+        )
+        .expect("proxy bid accepted");
+
+    assert_eq!(result.new_highest.amount, Money::from_cents(12_00));
+}
+
+#[test]
+fn proxy_bid_rejects_when_max_is_below_minimum() {
+    let mut auction = sample_auction(0, 500);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(10),
+        )
+        .expect("seed bid accepted");
+
+    let result = auction.place_proxy_bid(
+        UserId::new("user-2"),
+        Money::from_cents(11_00),
+        UnixSeconds::new(20),
+    );
+
+    assert!(matches!(result, Err(BidError::BidTooLow { .. })));
+}

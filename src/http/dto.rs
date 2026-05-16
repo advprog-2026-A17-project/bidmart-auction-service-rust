@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::persistence::models::{AuctionRecord, BidRecord};
 use crate::service::auction_service::CreateAuctionCommand;
+use crate::service::auction_strategy::AuctionType;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateAuctionRequest {
@@ -31,7 +32,7 @@ pub struct CreateAuctionRequest {
 
 impl CreateAuctionRequest {
     pub fn try_into_command(self) -> Result<CreateAuctionCommand, String> {
-        validate_auction_type(self.auction_type.as_deref())?;
+        let auction_type = AuctionType::from_input(self.auction_type.as_deref())?;
         Ok(CreateAuctionCommand {
             listing_id: self
                 .listing_id
@@ -53,6 +54,7 @@ impl CreateAuctionRequest {
                 .ok_or_else(|| "minimum_increment is required".to_string())?,
             start_time: resolve_unix_seconds(self.start_time, "start_time")?,
             end_time: resolve_unix_seconds(self.end_time, "end_time")?,
+            auction_type: auction_type.as_storage_value().to_string(),
         })
     }
 }
@@ -178,6 +180,34 @@ impl PlaceBidRequest {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlaceProxyBidRequest {
+    #[serde(default, alias = "bidderId")]
+    pub bidder_id: Option<String>,
+    #[serde(default)]
+    pub max_bid_amount_cents: Option<i64>,
+    #[serde(default, rename = "maxBidAmount")]
+    pub max_bid_amount: Option<f64>,
+    #[serde(default)]
+    pub bid_time: Option<i64>,
+}
+
+impl PlaceProxyBidRequest {
+    pub fn bidder_id(&self) -> Option<&str> {
+        self.bidder_id.as_deref()
+    }
+
+    pub fn max_bid_amount_cents(&self) -> Option<i64> {
+        self.max_bid_amount_cents
+            .or_else(|| self.max_bid_amount.map(decimal_to_cents))
+    }
+
+    pub fn bid_time(&self) -> i64 {
+        self.bid_time
+            .unwrap_or_else(|| chrono::Utc::now().timestamp())
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BidResponse {
     pub id: String,
@@ -216,24 +246,20 @@ impl From<BidRecord> for BidResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct BidCursorPageResponse {
+    pub items: Vec<BidResponse>,
+    #[serde(rename = "nextCursor")]
+    pub next_cursor: Option<String>,
+    pub size: i64,
+}
+
 fn cents_to_decimal(cents: i64) -> f64 {
     cents as f64 / 100.0
 }
 
 fn decimal_to_cents(amount: f64) -> i64 {
     (amount * 100.0).round() as i64
-}
-
-fn validate_auction_type(auction_type: Option<&str>) -> Result<(), String> {
-    let Some(auction_type) = auction_type else {
-        return Ok(());
-    };
-    if auction_type.trim().eq_ignore_ascii_case("ENGLISH") {
-        return Ok(());
-    }
-    Err(format!(
-        "Unsupported auction type: {auction_type}. Only ENGLISH is currently supported"
-    ))
 }
 
 fn resolve_unix_seconds(value: Option<RequestTimestamp>, field: &str) -> Result<i64, String> {

@@ -7,6 +7,10 @@ use crate::persistence::models::{
     AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
 };
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
+use crate::service::auction_strategy::{AuctionType, resolve_strategy};
+use crate::service::bid_policies::{
+    AmountBidPolicy, IdentityBidPolicy, TimeBidPolicy, WalletBidPolicy,
+};
 use thiserror::Error;
 use tokio::sync::OwnedMutexGuard;
 
@@ -94,6 +98,9 @@ impl AuctionService {
         command: CreateAuctionCommand,
     ) -> Result<AuctionRecord, CreateAuctionError> {
         command.validate()?;
+        let auction_type = AuctionType::from_input(Some(&command.auction_type))
+            .map_err(CreateAuctionError::InvalidInput)?;
+        resolve_strategy(auction_type).validate_create_request()?;
         self.validate_listing_for_auction(&command).await?;
 
         let now = chrono::Utc::now().timestamp();
@@ -249,7 +256,46 @@ impl AuctionService {
             .map_err(|error| ListBidsError::DatabaseError(error.to_string()))
     }
 
-    /// Place a bid on an auction
+    pub async fn list_bids_with_cursor(
+        &self,
+        auction_id: &str,
+        cursor: Option<&str>,
+        limit: Option<i64>,
+    ) -> Result<BidCursorPage, ListBidsError> {
+        let sanitized_limit = limit.unwrap_or(20).clamp(1, 100);
+        let parsed_cursor = match cursor {
+            Some(value) => Some(parse_bid_cursor(value).map_err(ListBidsError::InvalidInput)?),
+            None => None,
+        };
+
+        let mut bids = self
+            .bid_repo
+            .list_by_auction_cursor(
+                auction_id,
+                parsed_cursor.map(|cursor| (cursor.amount_cents, cursor.bid_time, cursor.id)),
+                sanitized_limit + 1,
+            )
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?;
+
+        let has_more = bids.len() as i64 > sanitized_limit;
+        if has_more {
+            bids.truncate(sanitized_limit as usize);
+        }
+
+        let next_cursor = if has_more {
+            bids.last().map(|bid| bid_cursor_from_bid(bid).to_string())
+        } else {
+            None
+        };
+
+        Ok(BidCursorPage {
+            items: bids,
+            next_cursor,
+            size: sanitized_limit,
+        })
+    }
+
     pub async fn place_bid_and_persist(
         &self,
         auction_id: &str,
@@ -257,18 +303,55 @@ impl AuctionService {
         bid_amount_cents: i64,
         bid_time: i64,
     ) -> Result<BidRecord, PlaceBidError> {
+        self.place_bid_internal(
+            auction_id,
+            bidder_id,
+            bid_time,
+            BidPlacementMode::Standard {
+                amount_cents: bid_amount_cents,
+            },
+        )
+        .await
+    }
+
+    pub async fn place_proxy_bid_and_persist(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+        max_bid_amount_cents: i64,
+        bid_time: i64,
+    ) -> Result<BidRecord, PlaceBidError> {
+        self.place_bid_internal(
+            auction_id,
+            bidder_id,
+            bid_time,
+            BidPlacementMode::Proxy {
+                max_amount_cents: max_bid_amount_cents,
+            },
+        )
+        .await
+    }
+
+    async fn place_bid_internal(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+        bid_time: i64,
+        mode: BidPlacementMode,
+    ) -> Result<BidRecord, PlaceBidError> {
         let _bid_guard = self.auction_bid_guard(auction_id).await;
 
-        if let Some(existing_bid) = self
-            .bid_repo
-            .find_matching_bid(auction_id, bidder_id, bid_amount_cents, bid_time)
-            .await
-            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
-        {
-            return Ok(existing_bid);
+        if let BidPlacementMode::Standard { amount_cents } = mode {
+            if let Some(existing_bid) = self
+                .bid_repo
+                .find_matching_bid(auction_id, bidder_id, amount_cents, bid_time)
+                .await
+                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
+            {
+                return Ok(existing_bid);
+            }
         }
 
-        // Fetch auction
         let auction_record = self
             .auction_repo
             .find_by_id(auction_id)
@@ -284,31 +367,52 @@ impl AuctionService {
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
-        // Convert to domain object with current highest bid
+        TimeBidPolicy::validate(&auction_record, bid_time).map_err(PlaceBidError::BidError)?;
+        IdentityBidPolicy::validate(&auction_record, bidder_id, previous_winning_bid.as_ref())
+            .map_err(PlaceBidError::BidError)?;
+
         let mut auction = self
             .record_to_domain_with_bid(&auction_record)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
-        // Place bid using domain logic
-        let bid_result = auction
-            .place_bid(
-                UserId::new(bidder_id),
-                Money::from_cents(bid_amount_cents as u64),
-                UnixSeconds::new(bid_time as u64),
-            )
-            .map_err(PlaceBidError::BidError)?;
+        let bid_result = match mode {
+            BidPlacementMode::Standard { amount_cents } => {
+                AmountBidPolicy::validate(
+                    &auction_record,
+                    amount_cents,
+                    previous_winning_bid.as_ref(),
+                )
+                .map_err(PlaceBidError::BidError)?;
+                auction
+                    .place_bid(
+                        UserId::new(bidder_id),
+                        Money::from_cents(amount_cents as u64),
+                        UnixSeconds::new(bid_time as u64),
+                    )
+                    .map_err(PlaceBidError::BidError)?
+            }
+            BidPlacementMode::Proxy { max_amount_cents } => auction
+                .place_proxy_bid(
+                    UserId::new(bidder_id),
+                    Money::from_cents(max_amount_cents as u64),
+                    UnixSeconds::new(bid_time as u64),
+                )
+                .map_err(PlaceBidError::BidError)?,
+        };
+        let accepted_bid_amount_cents = bid_result.new_highest.amount.cents() as i64;
+        WalletBidPolicy::validate(accepted_bid_amount_cents).map_err(PlaceBidError::BidError)?;
 
         let bid_id = uuid::Uuid::new_v4().to_string();
 
-        // Hold funds from wallet (blocking operation, part of critical path)
         let hold_id = if let Some(wallet_client) = &self.wallet_client {
             let hold_request = HoldFundsRequest {
                 user_id: bidder_id.to_string(),
+                role: Some("BUYER".to_string()),
                 hold_id: uuid::Uuid::new_v4().to_string(),
                 auction_id: auction_id.to_string(),
                 bid_id: bid_id.clone(),
-                amount: bid_amount_cents as u64,
+                amount: accepted_bid_amount_cents as u64,
                 expires_at: "2026-12-31T23:59:59Z".to_string(),
             };
 
@@ -322,12 +426,11 @@ impl AuctionService {
             None
         };
 
-        // Persist the bid
         let bid_record = NewBidRecord {
             id: bid_id,
             auction_id: auction_id.to_string(),
             bidder_id: bidder_id.to_string(),
-            bid_amount_cents,
+            bid_amount_cents: accepted_bid_amount_cents,
             bid_time,
         };
         let inserted_bid = match self
@@ -356,7 +459,6 @@ impl AuctionService {
                 .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
         }
 
-        // Update auction if it was extended or if current highest bid changed
         let new_highest_cents = bid_result.new_highest.amount.cents() as i64;
         let mut updated_record = auction_record.clone();
         updated_record.current_highest_bid_cents = Some(new_highest_cents);
@@ -600,6 +702,7 @@ impl AuctionService {
 pub struct CreateAuctionCommand {
     pub listing_id: String,
     pub seller_id: String,
+    pub auction_type: String,
     pub starting_price_cents: i64,
     pub reserve_price_cents: i64,
     pub minimum_increment_cents: i64,
@@ -618,6 +721,12 @@ impl CreateAuctionCommand {
         if self.seller_id.trim().is_empty() {
             return Err(CreateAuctionError::InvalidInput(
                 "seller_id is required".to_string(),
+            ));
+        }
+
+        if self.auction_type.trim().is_empty() {
+            return Err(CreateAuctionError::InvalidInput(
+                "auction_type is required".to_string(),
             ));
         }
 
@@ -662,6 +771,67 @@ fn is_catalog_listing_biddable(status: &str) -> bool {
     status.eq_ignore_ascii_case("ACTIVE") || status.eq_ignore_ascii_case("AUCTION_CREATED")
 }
 
+#[derive(Debug, Clone)]
+pub struct BidCursorPage {
+    pub items: Vec<BidRecord>,
+    pub next_cursor: Option<String>,
+    pub size: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BidPlacementMode {
+    Standard { amount_cents: i64 },
+    Proxy { max_amount_cents: i64 },
+}
+
+#[derive(Debug, Clone)]
+struct BidCursor {
+    amount_cents: i64,
+    bid_time: i64,
+    id: String,
+}
+
+fn parse_bid_cursor(value: &str) -> Result<BidCursor, String> {
+    let mut parts = value.splitn(3, ':');
+    let amount = parts
+        .next()
+        .ok_or_else(|| "invalid cursor format".to_string())?
+        .parse::<i64>()
+        .map_err(|_| "invalid cursor amount".to_string())?;
+    let bid_time = parts
+        .next()
+        .ok_or_else(|| "invalid cursor format".to_string())?
+        .parse::<i64>()
+        .map_err(|_| "invalid cursor bid time".to_string())?;
+    let id = parts
+        .next()
+        .ok_or_else(|| "invalid cursor format".to_string())?;
+
+    if id.trim().is_empty() {
+        return Err("invalid cursor id".to_string());
+    }
+
+    Ok(BidCursor {
+        amount_cents: amount,
+        bid_time,
+        id: id.to_string(),
+    })
+}
+
+fn bid_cursor_from_bid(bid: &BidRecord) -> BidCursor {
+    BidCursor {
+        amount_cents: bid.bid_amount_cents,
+        bid_time: bid.bid_time,
+        id: bid.id.clone(),
+    }
+}
+
+impl std::fmt::Display for BidCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}:{}", self.amount_cents, self.bid_time, self.id)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CreateAuctionError {
     #[error("{0}")]
@@ -702,6 +872,8 @@ pub enum CloseAuctionError {
 
 #[derive(Debug, Error)]
 pub enum ListBidsError {
+    #[error("{0}")]
+    InvalidInput(String),
     #[error("Database error: {0}")]
     DatabaseError(String),
 }

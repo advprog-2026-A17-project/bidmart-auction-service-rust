@@ -9,6 +9,7 @@ const DEFAULT_INTERNAL_SERVICE_TOKEN: &str = "bidmart-local-internal-token";
 #[serde(rename_all = "camelCase")]
 pub struct HoldFundsRequest {
     pub user_id: String,
+    pub role: Option<String>,
     pub hold_id: String,
     pub auction_id: String,
     pub bid_id: String,

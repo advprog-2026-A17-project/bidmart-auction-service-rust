@@ -16,7 +16,9 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::from_path_override("../bidmart-infrastructure/.env");
 
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| default_database_url());
-    let bind_address = env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+    let bind_address = env::var("BIND_ADDRESS")
+        .or_else(|_| env::var("PORT").map(|port| format!("0.0.0.0:{port}")))
+        .unwrap_or_else(|_| "0.0.0.0:3000".to_string());
     let scheduler_interval_ms = env::var("AUCTION_CLOSURE_SCHEDULER_INTERVAL_MS")
         .ok()
         .and_then(|s| s.parse().ok())

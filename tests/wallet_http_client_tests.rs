@@ -74,6 +74,7 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     let response = client
         .hold_funds(HoldFundsRequest {
             user_id: "bidder-http-1".to_string(),
+            role: Some("BUYER".to_string()),
             hold_id: "mock-hold-123".to_string(),
             auction_id: "auction-http-1".to_string(),
             bid_id: "bid-http-1".to_string(),
@@ -90,6 +91,7 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
     let requests = captured_requests.lock().expect("lock captured requests");
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["userId"], json!("bidder-http-1"));
+    assert_eq!(requests[0]["role"], json!("BUYER"));
     assert_eq!(requests[0]["holdId"], json!("mock-hold-123"));
     assert_eq!(requests[0]["auctionId"], json!("auction-http-1"));
     assert_eq!(requests[0]["bidId"], json!("bid-http-1"));

@@ -103,10 +103,19 @@ impl AuctionService {
         resolve_strategy(auction_type).validate_create_request()?;
         self.validate_listing_for_auction(&command).await?;
 
+        if let Some(existing) = self
+            .auction_repo
+            .find_by_listing_id(&command.listing_id)
+            .await
+            .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))?
+        {
+            return Ok(existing);
+        }
+
         let now = chrono::Utc::now().timestamp();
-        let listing_id = command.listing_id;
+        let listing_id = command.listing_id.clone();
         let auction = NewAuctionRecord {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: listing_id.clone(),
             listing_id,
             seller_id: command.seller_id,
             starting_price_cents: command.starting_price_cents,
@@ -156,8 +165,16 @@ impl AuctionService {
         &self,
         auction_id: &str,
     ) -> Result<Option<AuctionRecord>, GetAuctionError> {
-        self.auction_repo
+        let found = self
+            .auction_repo
             .find_by_id(auction_id)
+            .await
+            .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))?;
+        if found.is_some() {
+            return Ok(found);
+        }
+        self.auction_repo
+            .find_by_listing_id(auction_id)
             .await
             .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))
     }

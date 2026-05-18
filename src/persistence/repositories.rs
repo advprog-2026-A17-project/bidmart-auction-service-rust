@@ -50,6 +50,21 @@ impl AuctionRepository {
         .await
     }
 
+    pub async fn find_by_listing_id(
+        &self,
+        listing_id: &str,
+    ) -> Result<Option<AuctionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AuctionRecord>(
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings WHERE listing_id = $1 OR id = $1 \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(listing_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn list_all(&self) -> Result<Vec<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \

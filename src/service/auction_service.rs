@@ -623,6 +623,8 @@ impl AuctionService {
             "bidderId": bid.bidder_id,
             "amountCents": bid.bid_amount_cents,
             "currentPrice": bid.bid_amount_cents,
+            "status": auction.status,
+            "endTime": auction.end_time,
             "bidTime": bid.bid_time,
             "placedAt": now
         })

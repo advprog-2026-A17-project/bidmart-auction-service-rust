@@ -4,7 +4,8 @@ use sqlx::AnyPool;
 use tower::ServiceExt;
 
 use bidmart_auction_service_rust::server::{
-    build_router, catalog_client_from_url, wallet_client_from_url,
+    build_router, catalog_client_from_endpoints, catalog_client_from_url,
+    wallet_client_from_endpoints, wallet_client_from_url,
 };
 
 async fn setup_test_db() -> AnyPool {
@@ -66,9 +67,47 @@ fn catalog_client_from_url_skips_catalog_client_when_unconfigured() {
 }
 
 #[test]
+fn catalog_client_from_endpoints_prefers_grpc_catalog_client_when_configured() {
+    let client = catalog_client_from_endpoints(
+        Some("http://catalogue-service:50052"),
+        Some("not-a-valid-http-url"),
+    )
+    .expect("build catalog client");
+
+    assert!(client.is_some());
+}
+
+#[test]
+fn catalog_client_from_endpoints_falls_back_to_http_when_grpc_missing() {
+    let client = catalog_client_from_endpoints(None, Some("http://catalogue-service:8081"))
+        .expect("build catalog client");
+
+    assert!(client.is_some());
+}
+
+#[test]
 fn wallet_client_from_url_builds_http_wallet_client_when_configured() {
     let client =
         wallet_client_from_url(Some("http://wallet-service:8083")).expect("build wallet client");
+
+    assert!(client.is_some());
+}
+
+#[test]
+fn wallet_client_from_endpoints_prefers_grpc_wallet_client_when_configured() {
+    let client = wallet_client_from_endpoints(
+        Some("http://wallet-service:50051"),
+        Some("not-a-valid-http-url"),
+    )
+    .expect("build wallet client");
+
+    assert!(client.is_some());
+}
+
+#[test]
+fn wallet_client_from_endpoints_falls_back_to_http_when_grpc_missing() {
+    let client = wallet_client_from_endpoints(None, Some("http://wallet-service:8083"))
+        .expect("build wallet client");
 
     assert!(client.is_some());
 }

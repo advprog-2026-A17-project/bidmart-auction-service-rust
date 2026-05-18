@@ -5,8 +5,8 @@ use std::env;
 use std::sync::Arc;
 
 use crate::client::{
-    CatalogClient, CatalogClientError, HttpCatalogClient, HttpWalletClient, WalletClient,
-    WalletClientError,
+    CatalogClient, CatalogClientError, GrpcCatalogClient, GrpcWalletClient, HttpCatalogClient,
+    HttpWalletClient, WalletClient, WalletClientError,
 };
 use crate::http::router::create_router;
 use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
@@ -20,12 +20,16 @@ pub fn build_router(pool: AnyPool) -> (Router, AuctionService) {
     let auction_repo = AuctionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let catalog_url = env::var("CATALOGUE_SERVICE_URL").ok();
-    let catalog_client = catalog_client_from_url(catalog_url.as_deref())
-        .expect("CATALOGUE_SERVICE_URL must be a valid http URL");
-    let wallet_url = env::var("WALLET_SERVICE_URL").ok();
-    let wallet_client = wallet_client_from_url(wallet_url.as_deref())
-        .expect("WALLET_SERVICE_URL must be a valid http URL");
+    let catalog_grpc_url = env::var("CATALOGUE_GRPC_URL").ok();
+    let catalog_http_url = env::var("CATALOGUE_SERVICE_URL").ok();
+    let catalog_client =
+        catalog_client_from_endpoints(catalog_grpc_url.as_deref(), catalog_http_url.as_deref())
+            .expect("CATALOGUE_GRPC_URL or CATALOGUE_SERVICE_URL must be valid");
+    let wallet_grpc_url = env::var("WALLET_GRPC_URL").ok();
+    let wallet_http_url = env::var("WALLET_SERVICE_URL").ok();
+    let wallet_client =
+        wallet_client_from_endpoints(wallet_grpc_url.as_deref(), wallet_http_url.as_deref())
+            .expect("WALLET_GRPC_URL or WALLET_SERVICE_URL must be valid");
     let auction_service = AuctionService::new_with_clients(
         auction_repo,
         bid_repo,
@@ -47,6 +51,17 @@ pub fn catalog_client_from_url(
     Ok(Some(Arc::new(HttpCatalogClient::new(base_url)?)))
 }
 
+pub fn catalog_client_from_endpoints(
+    grpc_endpoint: Option<&str>,
+    http_base_url: Option<&str>,
+) -> Result<Option<Arc<dyn CatalogClient>>, CatalogClientError> {
+    if let Some(grpc_endpoint) = grpc_endpoint.filter(|value| !value.trim().is_empty()) {
+        return Ok(Some(Arc::new(GrpcCatalogClient::new(grpc_endpoint)?)));
+    }
+
+    catalog_client_from_url(http_base_url)
+}
+
 pub fn wallet_client_from_url(
     base_url: Option<&str>,
 ) -> Result<Option<Arc<dyn WalletClient>>, WalletClientError> {
@@ -55,6 +70,17 @@ pub fn wallet_client_from_url(
     };
 
     Ok(Some(Arc::new(HttpWalletClient::new(base_url)?)))
+}
+
+pub fn wallet_client_from_endpoints(
+    grpc_endpoint: Option<&str>,
+    http_base_url: Option<&str>,
+) -> Result<Option<Arc<dyn WalletClient>>, WalletClientError> {
+    if let Some(grpc_endpoint) = grpc_endpoint.filter(|value| !value.trim().is_empty()) {
+        return Ok(Some(Arc::new(GrpcWalletClient::new(grpc_endpoint)?)));
+    }
+
+    wallet_client_from_url(http_base_url)
 }
 
 pub async fn connect_pool(database_url: &str) -> Result<AnyPool, sqlx::Error> {

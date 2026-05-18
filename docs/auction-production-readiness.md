@@ -22,9 +22,15 @@ Winning bid selection is deterministic:
 
 The third rule handles equal-time edge cases deterministically. The domain still rejects bids that do not meet the configured increment, so equal accepted bids are mainly a persistence safety rule for imported data, retries, and edge cases.
 
-## HTTP Outbox Relay
+## Gateway REST + Internal gRPC
 
-The selected transport for this service is an HTTP outbox relay. `HttpOutboxPublisher` posts an event envelope to a configured relay endpoint. The relay can be implemented by catalogue, a gateway event endpoint, or a small event-router service.
+Frontend traffic remains REST at the API Gateway boundary. The auction service keeps its public HTTP API for gateway-facing integration.
+
+For internal performance-critical synchronous calls, auction-to-wallet hold operations and auction-to-catalog listing-summary checks now prioritize gRPC. The runtime uses `WALLET_GRPC_URL` and `CATALOGUE_GRPC_URL` when configured, and falls back to `WALLET_SERVICE_URL` and `CATALOGUE_SERVICE_URL` (HTTP) for compatibility.
+
+## RabbitMQ Outbox Relay
+
+Asynchronous domain-event delivery remains RabbitMQ-based through `RabbitMqOutboxPublisher`.
 
 The envelope contains:
 
@@ -34,7 +40,7 @@ The envelope contains:
 - `payload`
 - `created_at`
 
-This keeps the scheduler generic while giving the deployment a real transport. RabbitMQ can replace the HTTP relay later without changing domain or repository code.
+This keeps the outbox scheduler generic while preserving low coupling between the auction domain and downstream notification/consistency workflows.
 
 ## Idempotency
 

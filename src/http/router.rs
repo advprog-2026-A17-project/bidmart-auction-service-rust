@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -27,6 +29,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/auctions", get(list_auctions).post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
+        .route("/metrics", get(metrics))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
         .route(
             "/auctions/:auction_id/bids/cursor",
@@ -51,6 +54,23 @@ pub fn create_router(auction_service: AuctionService) -> Router {
             get(list_bids_cursor).post(place_proxy_bid),
         )
         .with_state(state)
+}
+
+async fn metrics() -> impl IntoResponse {
+    static STARTED_AT: OnceLock<Instant> = OnceLock::new();
+    let uptime_seconds = STARTED_AT.get_or_init(Instant::now).elapsed().as_secs_f64();
+
+    (
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        format!(
+            "# HELP bidmart_service_up Service availability gauge\n\
+             # TYPE bidmart_service_up gauge\n\
+             bidmart_service_up{{service=\"auction\"}} 1\n\
+             # HELP bidmart_service_uptime_seconds Service uptime in seconds\n\
+             # TYPE bidmart_service_uptime_seconds gauge\n\
+             bidmart_service_uptime_seconds{{service=\"auction\"}} {uptime_seconds}\n"
+        ),
+    )
 }
 
 async fn create_auction(

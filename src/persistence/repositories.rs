@@ -17,11 +17,11 @@ impl AuctionRepository {
 
     pub async fn insert(&self, auction: &NewAuctionRecord) -> Result<AuctionRecord, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "INSERT INTO auctions (id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at) \
+            "INSERT INTO listings (id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state, start_time, end_time, created_at, updated_at) \
              VALUES ($1, $2, $3, 'ENGLISH', $4, $5, $6, $7, $8, $9, $10, $11, $12) \
              RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, current_highest_bid_cents, \
-             minimum_increment_cents, status, start_time, end_time, created_at, updated_at"
+             minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at",
         )
         .bind(&auction.id)
         .bind(&auction.listing_id)
@@ -42,8 +42,8 @@ impl AuctionRepository {
     pub async fn find_by_id(&self, id: &str) -> Result<Option<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
-             FROM auctions WHERE id = $1"
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -53,8 +53,8 @@ impl AuctionRepository {
     pub async fn list_all(&self) -> Result<Vec<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
-             FROM auctions ORDER BY created_at DESC"
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await
@@ -63,10 +63,10 @@ impl AuctionRepository {
     pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<AuctionRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at \
-             FROM auctions \
-             WHERE end_time <= $1 AND status NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
-             ORDER BY end_time ASC"
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             ORDER BY end_time ASC",
         )
         .bind(now)
         .fetch_all(&self.pool)
@@ -81,11 +81,11 @@ impl AuctionRepository {
         updated_at: i64,
     ) -> Result<AuctionRecord, sqlx::Error> {
         sqlx::query_as::<_, AuctionRecord>(
-            "UPDATE auctions \
-             SET status = $1, current_highest_bid_cents = $2, updated_at = $3 \
+            "UPDATE listings \
+             SET lifecycle_state = $1, current_highest_bid_cents = $2, updated_at = $3 \
              WHERE id = $4 \
              RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at"
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at",
         )
         .bind(status)
         .bind(current_highest_bid_cents)
@@ -116,9 +116,9 @@ impl BidRepository {
         wallet_hold_id: Option<&str>,
     ) -> Result<BidRecord, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "INSERT INTO bids (id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id) \
+            "INSERT INTO bids (id, listing_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id) \
              VALUES ($1, $2, $3, $4, $5, $6) \
-             RETURNING id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id"
+             RETURNING id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id",
         )
         .bind(&bid.id)
         .bind(&bid.auction_id)
@@ -135,8 +135,8 @@ impl BidRepository {
         auction_id: &str,
     ) -> Result<Vec<BidRecord>, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
-             FROM bids WHERE auction_id = $1 \
+            "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+             FROM bids WHERE listing_id = $1 \
              ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC",
         )
         .bind(auction_id)
@@ -153,9 +153,9 @@ impl BidRepository {
         match cursor {
             Some((amount, bid_time, id)) => {
                 sqlx::query_as::<_, BidRecord>(
-                    "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+                    "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
                      FROM bids \
-                     WHERE auction_id = $1 \
+                     WHERE listing_id = $1 \
                        AND (bid_amount_cents < $2 \
                          OR (bid_amount_cents = $2 AND bid_time > $3) \
                          OR (bid_amount_cents = $2 AND bid_time = $3 AND id > $4)) \
@@ -172,9 +172,9 @@ impl BidRepository {
             }
             None => {
                 sqlx::query_as::<_, BidRecord>(
-                    "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+                    "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
                      FROM bids \
-                     WHERE auction_id = $1 \
+                     WHERE listing_id = $1 \
                      ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC \
                      LIMIT $2",
                 )
@@ -191,8 +191,8 @@ impl BidRepository {
         auction_id: &str,
     ) -> Result<Option<BidRecord>, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
-             FROM bids WHERE auction_id = $1 \
+            "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+             FROM bids WHERE listing_id = $1 \
              ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC \
              LIMIT 1",
         )
@@ -209,9 +209,9 @@ impl BidRepository {
         bid_time: i64,
     ) -> Result<Option<BidRecord>, sqlx::Error> {
         sqlx::query_as::<_, BidRecord>(
-            "SELECT id, auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+            "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
              FROM bids \
-             WHERE auction_id = $1 AND bidder_id = $2 AND bid_amount_cents = $3 AND bid_time = $4 \
+             WHERE listing_id = $1 AND bidder_id = $2 AND bid_amount_cents = $3 AND bid_time = $4 \
              ORDER BY id ASC \
              LIMIT 1",
         )
@@ -242,7 +242,7 @@ impl OutboxRepository {
             "INSERT INTO outbox_events (id, aggregate_id, event_type, payload, published, created_at, updated_at, published_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
              RETURNING id, aggregate_id, event_type, payload, CASE WHEN published THEN 1 ELSE 0 END AS published, \
-             published_at, created_at, updated_at"
+             published_at, created_at, updated_at",
         )
         .bind(&event.id)
         .bind(&event.aggregate_id)
@@ -262,7 +262,7 @@ impl OutboxRepository {
              published_at, created_at, updated_at \
              FROM outbox_events WHERE published = $1 \
              ORDER BY created_at ASC \
-             LIMIT $2"
+             LIMIT $2",
         )
         .bind(false)
         .bind(limit)
@@ -276,7 +276,7 @@ impl OutboxRepository {
         published_at: i64,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "UPDATE outbox_events SET published = $1, published_at = $2, updated_at = $3 WHERE id = $4"
+            "UPDATE outbox_events SET published = $1, published_at = $2, updated_at = $3 WHERE id = $4",
         )
         .bind(true)
         .bind(published_at)

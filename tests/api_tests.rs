@@ -59,7 +59,7 @@ async fn create_auction_returns_created_auction_response() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/auctions")
+                .uri("/listings")
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -130,7 +130,7 @@ async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -177,7 +177,7 @@ async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -228,7 +228,7 @@ async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -289,7 +289,7 @@ async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .header("x-user-id", "seller-from-gateway")
                 .body(Body::from(request_body.to_string()))
@@ -340,7 +340,7 @@ async fn api_v1_create_auction_rejects_conflicting_gateway_seller_header() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .header("x-user-id", "seller-from-gateway")
                 .body(Body::from(request_body.to_string()))
@@ -377,7 +377,7 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -438,7 +438,7 @@ async fn get_auction_by_id_returns_auction_response() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(format!("/auctions/{auction_id}"))
+                .uri(format!("/listings/{auction_id}"))
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -498,7 +498,7 @@ async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(format!("/api/v1/auctions/{auction_id}"))
+                .uri(format!("/api/v1/listings/{auction_id}"))
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -575,7 +575,7 @@ async fn api_v1_list_auctions_returns_gateway_compatible_page() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri("/api/v1/auctions")
+                .uri("/api/v1/listings")
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -647,7 +647,7 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/auctions/{auction_id}/bids"))
+                .uri(format!("/listings/{auction_id}/bids"))
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -726,7 +726,7 @@ async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response()
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids"))
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -793,7 +793,7 @@ async fn api_v1_place_bid_uses_trusted_gateway_user_header() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids"))
                 .header("content-type", "application/json")
                 .header("x-user-id", "bidder-from-gateway")
                 .body(Body::from(request_body.to_string()))
@@ -851,7 +851,7 @@ async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids"))
                 .header("content-type", "application/json")
                 .header("x-user-id", "bidder-from-gateway")
                 .body(Body::from(request_body.to_string()))
@@ -901,7 +901,7 @@ async fn api_v1_place_bid_rejects_seller_bidding_own_auction() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids"))
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -950,7 +950,7 @@ async fn api_v1_place_proxy_bid_rejects_seller_bidding_own_auction() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids/cursor"))
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -1015,7 +1015,7 @@ async fn list_bids_returns_bid_history_for_auction() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(format!("/auctions/{auction_id}/bids"))
+                .uri(format!("/listings/{auction_id}/bids"))
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -1105,7 +1105,7 @@ async fn list_bids_cursor_returns_paginated_bid_history() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor?limit=2"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids/cursor?limit=2"))
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -1130,7 +1130,7 @@ async fn list_bids_cursor_returns_paginated_bid_history() {
             Request::builder()
                 .method(Method::GET)
                 .uri(format!(
-                    "/api/v1/auctions/{auction_id}/bids/cursor?limit=2&cursor={cursor}"
+                    "/api/v1/listings/{auction_id}/bids/cursor?limit=2&cursor={cursor}"
                 ))
                 .body(Body::empty())
                 .expect("build request"),
@@ -1196,7 +1196,7 @@ async fn place_proxy_bid_places_increment_over_current_winner() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/bids/cursor"))
+                .uri(format!("/api/v1/listings/{auction_id}/bids/cursor"))
                 .header("content-type", "application/json")
                 .body(Body::from(request_body.to_string()))
                 .expect("build request"),
@@ -1257,7 +1257,7 @@ async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri(format!("/api/v1/auctions/{auction_id}/close"))
+                .uri(format!("/api/v1/listings/{auction_id}/close"))
                 .body(Body::empty())
                 .expect("build request"),
         )
@@ -1347,7 +1347,7 @@ async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri("/api/v1/auctions/pending-closure")
+                .uri("/api/v1/listings/pending-closure")
                 .body(Body::empty())
                 .expect("build request"),
         )

@@ -27,27 +27,52 @@ pub fn create_router(auction_service: AuctionService) -> Router {
         auction_service: Arc::new(auction_service),
     };
     Router::new()
+        .route("/listings", get(list_auctions).post(create_auction))
+        .route("/listings/:listing_id", get(get_auction_by_id))
         .route("/auctions", get(list_auctions).post(create_auction))
         .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/metrics", get(metrics))
+        .route("/listings/:listing_id/bids", get(list_bids).post(place_bid))
         .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
+        .route(
+            "/listings/:listing_id/bids/cursor",
+            get(list_bids_cursor).post(place_proxy_bid),
+        )
         .route(
             "/auctions/:auction_id/bids/cursor",
             get(list_bids_cursor).post(place_proxy_bid),
         )
+        .route("/api/v1/listings", get(list_auctions).post(create_auction))
         .route("/api/v1/auctions", get(list_auctions).post(create_auction))
+        .route(
+            "/api/v1/listings/pending-closure",
+            get(list_pending_closure),
+        )
         .route(
             "/api/v1/auctions/pending-closure",
             get(list_pending_closure),
         )
+        .route("/api/v1/listings/:listing_id", get(get_auction_by_id))
         .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
+        .route(
+            "/api/v1/listings/:listing_id/close",
+            axum::routing::post(close_auction),
+        )
         .route(
             "/api/v1/auctions/:auction_id/close",
             axum::routing::post(close_auction),
         )
         .route(
+            "/api/v1/listings/:listing_id/bids",
+            get(list_bids).post(place_bid),
+        )
+        .route(
             "/api/v1/auctions/:auction_id/bids",
             get(list_bids).post(place_bid),
+        )
+        .route(
+            "/api/v1/listings/:listing_id/bids/cursor",
+            get(list_bids_cursor).post(place_proxy_bid),
         )
         .route(
             "/api/v1/auctions/:auction_id/bids/cursor",
@@ -102,13 +127,13 @@ async fn list_auctions(
 
 async fn get_auction_by_id(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
 ) -> Result<Json<AuctionResponse>, ApiError> {
     let auction = state
         .auction_service
-        .get_auction_by_id(&auction_id)
+        .get_auction_by_id(&listing_id)
         .await?
-        .ok_or_else(|| ApiError::not_found("auction not found"))?;
+        .ok_or_else(|| ApiError::not_found("listing not found"))?;
 
     Ok(Json(auction.into()))
 }
@@ -123,15 +148,15 @@ async fn list_pending_closure(
 
 async fn close_auction(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
 ) -> Result<Json<AuctionResponse>, ApiError> {
-    let auction = state.auction_service.close_auction(&auction_id).await?;
+    let auction = state.auction_service.close_auction(&listing_id).await?;
     Ok(Json(auction.into()))
 }
 
 async fn place_bid(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
     headers: HeaderMap,
     Json(request): Json<PlaceBidRequest>,
 ) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
@@ -143,7 +168,7 @@ async fn place_bid(
     let bid = state
         .auction_service
         .place_bid_and_persist(
-            &auction_id,
+            &listing_id,
             &bidder_id,
             bid_amount_cents,
             request.bid_time(),
@@ -155,9 +180,9 @@ async fn place_bid(
 
 async fn list_bids(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
 ) -> Result<Json<Vec<BidResponse>>, ApiError> {
-    let bids = state.auction_service.list_bids(&auction_id).await?;
+    let bids = state.auction_service.list_bids(&listing_id).await?;
     let response = bids.into_iter().map(BidResponse::from).collect();
 
     Ok(Json(response))
@@ -171,12 +196,12 @@ struct BidCursorQuery {
 
 async fn list_bids_cursor(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
     Query(query): Query<BidCursorQuery>,
 ) -> Result<Json<BidCursorPageResponse>, ApiError> {
     let page = state
         .auction_service
-        .list_bids_with_cursor(&auction_id, query.cursor.as_deref(), query.limit)
+        .list_bids_with_cursor(&listing_id, query.cursor.as_deref(), query.limit)
         .await?;
     let items = page.items.into_iter().map(BidResponse::from).collect();
 
@@ -189,7 +214,7 @@ async fn list_bids_cursor(
 
 async fn place_proxy_bid(
     State(state): State<AppState>,
-    Path(auction_id): Path<String>,
+    Path(listing_id): Path<String>,
     headers: HeaderMap,
     Json(request): Json<PlaceProxyBidRequest>,
 ) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
@@ -201,7 +226,7 @@ async fn place_proxy_bid(
     let bid = state
         .auction_service
         .place_proxy_bid_and_persist(
-            &auction_id,
+            &listing_id,
             &bidder_id,
             max_bid_amount_cents,
             request.bid_time(),
@@ -333,11 +358,11 @@ impl From<CloseAuctionError> for ApiError {
         match error {
             CloseAuctionError::AuctionNotFound => Self {
                 status: StatusCode::NOT_FOUND,
-                message: "auction not found".to_string(),
+                message: "listing not found".to_string(),
             },
             CloseAuctionError::AuctionNotEnded => Self {
                 status: StatusCode::BAD_REQUEST,
-                message: "auction has not reached its end time".to_string(),
+                message: "listing has not reached its end time".to_string(),
             },
             CloseAuctionError::WalletError(message) => Self {
                 status: StatusCode::PAYMENT_REQUIRED,
@@ -356,7 +381,7 @@ impl From<PlaceBidError> for ApiError {
         match error {
             PlaceBidError::AuctionNotFound => Self {
                 status: StatusCode::NOT_FOUND,
-                message: "auction not found".to_string(),
+                message: "listing not found".to_string(),
             },
             PlaceBidError::BidError(error) => Self {
                 status: StatusCode::BAD_REQUEST,

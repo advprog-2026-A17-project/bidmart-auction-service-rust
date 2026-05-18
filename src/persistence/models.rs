@@ -109,16 +109,23 @@ fn bool_from_row(row: &AnyRow, column: &str) -> Result<bool, sqlx::Error> {
 
 impl<'r> FromRow<'r, AnyRow> for AuctionRecord {
     fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        let id: String = row.try_get("id")?;
+        let listing_id = row
+            .try_get::<String, _>("listing_id")
+            .unwrap_or_else(|_| id.clone());
+        let status = row
+            .try_get::<String, _>("status")
+            .or_else(|_| row.try_get("lifecycle_state"))?;
         Ok(Self {
-            id: row.try_get("id")?,
-            listing_id: row.try_get("listing_id")?,
+            id,
+            listing_id,
             seller_id: row.try_get("seller_id")?,
             auction_type: row.try_get("auction_type")?,
             starting_price_cents: row.try_get("starting_price_cents")?,
             reserve_price_cents: row.try_get("reserve_price_cents")?,
             current_highest_bid_cents: optional_i64(row, "current_highest_bid_cents")?,
             minimum_increment_cents: row.try_get("minimum_increment_cents")?,
-            status: row.try_get("status")?,
+            status,
             start_time: row.try_get("start_time")?,
             end_time: row.try_get("end_time")?,
             created_at: row.try_get("created_at")?,
@@ -129,9 +136,12 @@ impl<'r> FromRow<'r, AnyRow> for AuctionRecord {
 
 impl<'r> FromRow<'r, AnyRow> for BidRecord {
     fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        let auction_id = row
+            .try_get::<String, _>("auction_id")
+            .or_else(|_| row.try_get("listing_id"))?;
         Ok(Self {
             id: row.try_get("id")?,
-            auction_id: row.try_get("auction_id")?,
+            auction_id,
             bidder_id: row.try_get("bidder_id")?,
             bid_amount_cents: row.try_get("bid_amount_cents")?,
             bid_time: row.try_get("bid_time")?,

@@ -104,9 +104,10 @@ impl AuctionService {
         self.validate_listing_for_auction(&command).await?;
 
         let now = chrono::Utc::now().timestamp();
+        let listing_id = command.listing_id;
         let auction = NewAuctionRecord {
             id: uuid::Uuid::new_v4().to_string(),
-            listing_id: command.listing_id,
+            listing_id,
             seller_id: command.seller_id,
             starting_price_cents: command.starting_price_cents,
             reserve_price_cents: command.reserve_price_cents,
@@ -467,11 +468,11 @@ impl AuctionService {
         updated_record.updated_at = bid_time;
 
         let persisted_update = sqlx::query_as::<_, AuctionRecord>(
-            "UPDATE auctions \
-             SET current_highest_bid_cents = $1, end_time = $2, status = $3, updated_at = $4 \
+            "UPDATE listings \
+             SET current_highest_bid_cents = $1, end_time = $2, lifecycle_state = $3, updated_at = $4 \
              WHERE id = $5 AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < $6) \
              RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
-             current_highest_bid_cents, minimum_increment_cents, status, start_time, end_time, created_at, updated_at",
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at",
         )
         .bind(updated_record.current_highest_bid_cents)
         .bind(updated_record.end_time)
@@ -768,7 +769,7 @@ fn initial_status(start_time: i64, now: i64) -> String {
 }
 
 fn is_catalog_listing_biddable(status: &str) -> bool {
-    status.eq_ignore_ascii_case("ACTIVE") || status.eq_ignore_ascii_case("AUCTION_CREATED")
+    status.eq_ignore_ascii_case("ACTIVE") || status.eq_ignore_ascii_case("EXTENDED")
 }
 
 #[derive(Debug, Clone)]

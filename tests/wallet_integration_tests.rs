@@ -368,7 +368,7 @@ async fn test_close_won_auction_converts_winning_hold() {
         .expect("winning bid");
     let winning_hold = wallet_client.get_holds()[0].hold_id.clone();
 
-    sqlx::query("UPDATE auctions SET end_time = ? WHERE id = ?")
+    sqlx::query("UPDATE listings SET end_time = ? WHERE id = ?")
         .bind(now - 1)
         .bind(&auction_id)
         .execute(&auction_repo.pool)
@@ -427,7 +427,7 @@ async fn test_close_unsold_auction_releases_all_holds() {
         .expect("bid below reserve");
     let held = wallet_client.get_holds()[0].hold_id.clone();
 
-    sqlx::query("UPDATE auctions SET end_time = ? WHERE id = ?")
+    sqlx::query("UPDATE listings SET end_time = ? WHERE id = ?")
         .bind(now - 1)
         .bind(&auction_id)
         .execute(&auction_repo.pool)

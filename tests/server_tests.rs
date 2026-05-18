@@ -41,7 +41,7 @@ async fn build_router_wires_service_repositories_into_http_app() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri("/auctions/missing-auction")
+                .uri("/listings/missing-auction")
                 .body(Body::empty())
                 .expect("build request"),
         )

@@ -173,7 +173,7 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
 }
 
 #[tokio::test]
-async fn place_bid_accepts_catalog_listing_after_auction_created_lifecycle() {
+async fn place_bid_accepts_catalog_listing_after_extended_lifecycle() {
     let command = create_command();
     let catalog_client = Arc::new(MockCatalogClient::new(ListingSummary {
         id: command.listing_id.clone(),
@@ -189,7 +189,7 @@ async fn place_bid_accepts_catalog_listing_after_auction_created_lifecycle() {
     catalog_client.set_listing(ListingSummary {
         id: command.listing_id,
         seller_id: command.seller_id,
-        status: "AUCTION_CREATED".to_string(),
+        status: "EXTENDED".to_string(),
     });
 
     let bid = service
@@ -200,7 +200,7 @@ async fn place_bid_accepts_catalog_listing_after_auction_created_lifecycle() {
             auction.start_time + 10,
         )
         .await
-        .expect("place bid after auction-created lifecycle");
+        .expect("place bid after extended lifecycle");
 
     assert_eq!(bid.auction_id, auction.id);
     assert_eq!(bid.bidder_id, "bidder-catalog-auction-created");

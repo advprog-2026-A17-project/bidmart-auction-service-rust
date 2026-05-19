@@ -200,6 +200,9 @@ impl WalletClient for GrpcWalletClient {
             .await
             .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
         let mut grpc = Grpc::new(channel);
+        grpc.ready()
+            .await
+            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
         let mut grpc_request = tonic::Request::new(GrpcHoldFundsRequest {
             user_id: request.user_id,
             role: request.role,
@@ -235,6 +238,9 @@ impl WalletClient for GrpcWalletClient {
             .await
             .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
         let mut grpc = Grpc::new(channel);
+        grpc.ready()
+            .await
+            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
         let mut grpc_request = tonic::Request::new(GrpcReleaseFundsRequest {
             hold_id: hold_id.to_string(),
         });
@@ -259,6 +265,9 @@ impl WalletClient for GrpcWalletClient {
             .await
             .map_err(|error| WalletClientError::NetworkError(error.to_string()))?;
         let mut grpc = Grpc::new(channel);
+        grpc.ready()
+            .await
+            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
         let mut grpc_request = tonic::Request::new(GrpcConvertFundsRequest {
             hold_id: hold_id.to_string(),
         });

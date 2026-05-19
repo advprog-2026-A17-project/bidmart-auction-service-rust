@@ -109,6 +109,9 @@ impl CatalogClient for GrpcCatalogClient {
             .await
             .map_err(|error| CatalogClientError::NetworkError(error.to_string()))?;
         let mut grpc = Grpc::new(channel);
+        grpc.ready()
+            .await
+            .map_err(|error| CatalogClientError::ServiceError(error.to_string()))?;
         let grpc_request = tonic::Request::new(GrpcGetListingSummaryRequest {
             listing_id: listing_id.to_string(),
         });

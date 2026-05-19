@@ -59,7 +59,11 @@ pub fn catalog_client_from_endpoints(
         return Ok(Some(Arc::new(GrpcCatalogClient::new(grpc_endpoint)?)));
     }
 
-    catalog_client_from_url(http_base_url)
+    if let Some(http_base_url) = http_base_url.filter(|value| !value.trim().is_empty()) {
+        return Ok(Some(Arc::new(HttpCatalogClient::new(http_base_url)?)));
+    }
+
+    Ok(None)
 }
 
 pub fn wallet_client_from_url(
@@ -80,7 +84,11 @@ pub fn wallet_client_from_endpoints(
         return Ok(Some(Arc::new(GrpcWalletClient::new(grpc_endpoint)?)));
     }
 
-    wallet_client_from_url(http_base_url)
+    if let Some(http_base_url) = http_base_url.filter(|value| !value.trim().is_empty()) {
+        return Ok(Some(Arc::new(HttpWalletClient::new(http_base_url)?)));
+    }
+
+    Ok(None)
 }
 
 pub async fn connect_pool(database_url: &str) -> Result<AnyPool, sqlx::Error> {

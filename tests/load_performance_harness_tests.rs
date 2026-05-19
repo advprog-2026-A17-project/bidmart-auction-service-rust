@@ -114,6 +114,16 @@ async fn run_seeded_bidding_load_harness() {
     let p50 = latencies_ms[latencies_ms.len() / 2];
     let p95 = latencies_ms[(latencies_ms.len() * 95) / 100];
     let max = *latencies_ms.last().expect("max latency");
+    let apdex_t_ms = 100u64;
+    let satisfied = latencies_ms
+        .iter()
+        .filter(|latency| **latency <= apdex_t_ms)
+        .count();
+    let tolerating = latencies_ms
+        .iter()
+        .filter(|latency| **latency > apdex_t_ms && **latency <= apdex_t_ms * 4)
+        .count();
+    let apdex_score = (satisfied as f64 + (tolerating as f64 / 2.0)) / latencies_ms.len() as f64;
 
     let bids = bid_repo
         .list_by_auction_id_desc(&auction_id)
@@ -123,7 +133,7 @@ async fn run_seeded_bidding_load_harness() {
     assert!(accepted > 0);
     assert!(!bids.is_empty());
     println!(
-        "load-harness seed=20260516 attempts={attempts} accepted={accepted} bids={} p50_ms={p50} p95_ms={p95} max_ms={max}",
-        bids.len(),
+        "load-harness seed=20260516 attempts={attempts} accepted={accepted} bids={} p50_ms={p50} p95_ms={p95} max_ms={max} apdex_t_ms={apdex_t_ms} apdex={apdex_score:.3} satisfied={satisfied} tolerating={tolerating}",
+        bids.len()
     );
 }

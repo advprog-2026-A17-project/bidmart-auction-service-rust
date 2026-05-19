@@ -3,7 +3,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
-use crate::service::auction_service::{AuctionService, CloseAuctionError, ListPendingClosureError};
+use crate::service::auction_service::{AuctionService, CloseListingAuctionSessionError, ListPendingClosureError};
 
 #[derive(Debug, Clone)]
 pub struct AuctionClosureScheduler {
@@ -65,5 +65,5 @@ pub enum AuctionClosureSchedulerError {
     #[error("List pending closure error: {0}")]
     ListPendingClosure(#[from] ListPendingClosureError),
     #[error("Close auction error: {0}")]
-    CloseAuction(#[from] CloseAuctionError),
+    CloseAuction(#[from] CloseListingAuctionSessionError),
 }

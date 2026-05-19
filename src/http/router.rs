@@ -13,7 +13,7 @@ use crate::http::dto::{
     ErrorResponse, PlaceBidRequest, PlaceProxyBidRequest,
 };
 use crate::service::auction_service::{
-    AuctionService, CloseAuctionError, CreateAuctionError, GetAuctionError, ListAuctionsError,
+    AuctionService, CloseListingAuctionSessionError, CreateAuctionError, GetListingAuctionSessionError, ListListingAuctionSessionsError,
     ListBidsError, ListPendingClosureError, PlaceBidError,
 };
 
@@ -29,37 +29,20 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/listings", get(list_auctions).post(create_auction))
         .route("/listings/:listing_id", get(get_auction_by_id))
-        .route("/auctions", get(list_auctions).post(create_auction))
-        .route("/auctions/:auction_id", get(get_auction_by_id))
         .route("/metrics", get(metrics))
         .route("/listings/:listing_id/bids", get(list_bids).post(place_bid))
-        .route("/auctions/:auction_id/bids", get(list_bids).post(place_bid))
         .route(
             "/listings/:listing_id/bids/cursor",
             get(list_bids_cursor).post(place_proxy_bid),
         )
-        .route(
-            "/auctions/:auction_id/bids/cursor",
-            get(list_bids_cursor).post(place_proxy_bid),
-        )
         .route("/api/v1/listings", get(list_auctions).post(create_auction))
-        .route("/api/v1/auctions", get(list_auctions).post(create_auction))
         .route(
             "/api/v1/listings/pending-closure",
             get(list_pending_closure),
         )
-        .route(
-            "/api/v1/auctions/pending-closure",
-            get(list_pending_closure),
-        )
         .route("/api/v1/listings/:listing_id", get(get_auction_by_id))
-        .route("/api/v1/auctions/:auction_id", get(get_auction_by_id))
         .route(
             "/api/v1/listings/:listing_id/close",
-            axum::routing::post(close_auction),
-        )
-        .route(
-            "/api/v1/auctions/:auction_id/close",
             axum::routing::post(close_auction),
         )
         .route(
@@ -67,15 +50,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
             get(list_bids).post(place_bid),
         )
         .route(
-            "/api/v1/auctions/:auction_id/bids",
-            get(list_bids).post(place_bid),
-        )
-        .route(
             "/api/v1/listings/:listing_id/bids/cursor",
-            get(list_bids_cursor).post(place_proxy_bid),
-        )
-        .route(
-            "/api/v1/auctions/:auction_id/bids/cursor",
             get(list_bids_cursor).post(place_proxy_bid),
         )
         .with_state(state)
@@ -320,10 +295,10 @@ impl From<CreateAuctionError> for ApiError {
     }
 }
 
-impl From<GetAuctionError> for ApiError {
-    fn from(error: GetAuctionError) -> Self {
+impl From<GetListingAuctionSessionError> for ApiError {
+    fn from(error: GetListingAuctionSessionError) -> Self {
         match error {
-            GetAuctionError::DatabaseError(message) => Self {
+            GetListingAuctionSessionError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },
@@ -331,10 +306,10 @@ impl From<GetAuctionError> for ApiError {
     }
 }
 
-impl From<ListAuctionsError> for ApiError {
-    fn from(error: ListAuctionsError) -> Self {
+impl From<ListListingAuctionSessionsError> for ApiError {
+    fn from(error: ListListingAuctionSessionsError) -> Self {
         match error {
-            ListAuctionsError::DatabaseError(message) => Self {
+            ListListingAuctionSessionsError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },
@@ -353,22 +328,22 @@ impl From<ListPendingClosureError> for ApiError {
     }
 }
 
-impl From<CloseAuctionError> for ApiError {
-    fn from(error: CloseAuctionError) -> Self {
+impl From<CloseListingAuctionSessionError> for ApiError {
+    fn from(error: CloseListingAuctionSessionError) -> Self {
         match error {
-            CloseAuctionError::AuctionNotFound => Self {
+            CloseListingAuctionSessionError::AuctionNotFound => Self {
                 status: StatusCode::NOT_FOUND,
                 message: "listing not found".to_string(),
             },
-            CloseAuctionError::AuctionNotEnded => Self {
+            CloseListingAuctionSessionError::AuctionNotEnded => Self {
                 status: StatusCode::BAD_REQUEST,
                 message: "listing has not reached its end time".to_string(),
             },
-            CloseAuctionError::WalletError(message) => Self {
+            CloseListingAuctionSessionError::WalletError(message) => Self {
                 status: StatusCode::PAYMENT_REQUIRED,
                 message,
             },
-            CloseAuctionError::DatabaseError(message) => Self {
+            CloseListingAuctionSessionError::DatabaseError(message) => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

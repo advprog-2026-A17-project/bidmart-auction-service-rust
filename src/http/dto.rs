@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::persistence::models::{AuctionRecord, BidRecord};
+use crate::persistence::models::{ListingAuctionSessionRecord, BidRecord};
 use crate::service::auction_service::CreateAuctionCommand;
 use crate::service::auction_strategy::AuctionType;
 
@@ -99,8 +99,8 @@ pub struct AuctionResponse {
     pub end_time_api: String,
 }
 
-impl From<AuctionRecord> for AuctionResponse {
-    fn from(record: AuctionRecord) -> Self {
+impl From<ListingAuctionSessionRecord> for AuctionResponse {
+    fn from(record: ListingAuctionSessionRecord) -> Self {
         let listing_id = record.listing_id;
         let seller_id = record.seller_id;
         let auction_type = record.auction_type;

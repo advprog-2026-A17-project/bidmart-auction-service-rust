@@ -1,5 +1,5 @@
-use crate::auction::{AuctionStatus, BidError, Money, UserId};
-use crate::persistence::models::{AuctionRecord, BidRecord};
+use crate::listing_auction_session::{ListingAuctionSessionStatus, BidError, Money, UserId};
+use crate::persistence::models::{ListingAuctionSessionRecord, BidRecord};
 
 pub struct TimeBidPolicy;
 pub struct IdentityBidPolicy;
@@ -7,21 +7,21 @@ pub struct AmountBidPolicy;
 pub struct WalletBidPolicy;
 
 impl TimeBidPolicy {
-    pub fn validate(auction: &AuctionRecord, bid_time: i64) -> Result<(), BidError> {
+    pub fn validate(auction: &ListingAuctionSessionRecord, bid_time: i64) -> Result<(), BidError> {
         let status = map_status(&auction.status);
-        if status != AuctionStatus::Active && status != AuctionStatus::Extended {
+        if status != ListingAuctionSessionStatus::Active && status != ListingAuctionSessionStatus::Extended {
             return Err(BidError::AuctionNotActive { status });
         }
 
         if bid_time < auction.start_time {
             return Err(BidError::AuctionNotStarted {
-                start_at: crate::auction::UnixSeconds::new(auction.start_time as u64),
+                start_at: crate::listing_auction_session::UnixSeconds::new(auction.start_time as u64),
             });
         }
 
         if bid_time >= auction.end_time {
             return Err(BidError::AuctionEnded {
-                end_at: crate::auction::UnixSeconds::new(auction.end_time as u64),
+                end_at: crate::listing_auction_session::UnixSeconds::new(auction.end_time as u64),
             });
         }
 
@@ -31,7 +31,7 @@ impl TimeBidPolicy {
 
 impl IdentityBidPolicy {
     pub fn validate(
-        auction: &AuctionRecord,
+        auction: &ListingAuctionSessionRecord,
         bidder_id: &str,
         winning_bid: Option<&BidRecord>,
     ) -> Result<(), BidError> {
@@ -56,7 +56,7 @@ impl IdentityBidPolicy {
 
 impl AmountBidPolicy {
     pub fn validate(
-        auction: &AuctionRecord,
+        auction: &ListingAuctionSessionRecord,
         bid_amount_cents: i64,
         winning_bid: Option<&BidRecord>,
     ) -> Result<(), BidError> {
@@ -85,13 +85,13 @@ impl WalletBidPolicy {
     }
 }
 
-fn map_status(status: &str) -> AuctionStatus {
+fn map_status(status: &str) -> ListingAuctionSessionStatus {
     match status {
-        "SCHEDULED" => AuctionStatus::Scheduled,
-        "ACTIVE" => AuctionStatus::Active,
-        "EXTENDED" => AuctionStatus::Extended,
-        "ENDED" | "WON" | "UNSOLD" => AuctionStatus::Ended,
-        "CANCELLED" => AuctionStatus::Cancelled,
-        _ => AuctionStatus::Scheduled,
+        "SCHEDULED" => ListingAuctionSessionStatus::Scheduled,
+        "ACTIVE" => ListingAuctionSessionStatus::Active,
+        "EXTENDED" => ListingAuctionSessionStatus::Extended,
+        "ENDED" | "WON" | "UNSOLD" => ListingAuctionSessionStatus::Ended,
+        "CANCELLED" => ListingAuctionSessionStatus::Cancelled,
+        _ => ListingAuctionSessionStatus::Scheduled,
     }
 }

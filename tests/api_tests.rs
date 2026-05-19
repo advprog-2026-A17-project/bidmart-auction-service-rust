@@ -5,9 +5,9 @@ use sqlx::AnyPool;
 use tower::ServiceExt;
 
 use bidmart_auction_service_rust::http::router::create_router;
-use bidmart_auction_service_rust::persistence::models::{NewAuctionRecord, NewBidRecord};
+use bidmart_auction_service_rust::persistence::models::{NewListingAuctionSessionRecord, NewBidRecord};
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
@@ -38,10 +38,10 @@ async fn setup_test_db() -> AnyPool {
 #[tokio::test]
 async fn create_auction_returns_created_auction_response() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -91,7 +91,7 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(response_body["start_time"], json!(now - 60));
     assert_eq!(response_body["end_time"], json!(now + 600));
 
-    let persisted = auction_repo
+    let persisted = listing_auction_session_repo
         .find_by_id(&auction_id)
         .await
         .expect("find persisted auction")
@@ -108,10 +108,10 @@ async fn create_auction_returns_created_auction_response() {
 #[tokio::test]
 async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -155,10 +155,10 @@ async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
 #[tokio::test]
 async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -202,10 +202,10 @@ async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
 #[tokio::test]
 async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let start_time = chrono::DateTime::<chrono::Utc>::from_timestamp(1_900_000_000, 0)
@@ -252,7 +252,7 @@ async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
     assert_eq!(response_body["reservePrice"], json!(50.0));
     assert_eq!(response_body["minimumIncrement"], json!(2.5));
 
-    let persisted = auction_repo
+    let persisted = listing_auction_session_repo
         .find_by_id(auction_id)
         .await
         .expect("find persisted auction")
@@ -269,10 +269,10 @@ async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
 #[tokio::test]
 async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -308,7 +308,7 @@ async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
         .as_str()
         .expect("response has auction id");
 
-    let persisted = auction_repo
+    let persisted = listing_auction_session_repo
         .find_by_id(auction_id)
         .await
         .expect("find persisted auction")
@@ -319,10 +319,10 @@ async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
 #[tokio::test]
 async fn api_v1_create_auction_rejects_conflicting_gateway_seller_header() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo, bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -355,10 +355,10 @@ async fn api_v1_create_auction_rejects_conflicting_gateway_seller_header() {
 #[tokio::test]
 async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -395,7 +395,7 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
         .as_str()
         .expect("response has auction id");
 
-    let persisted = auction_repo
+    let persisted = listing_auction_session_repo
         .find_by_id(auction_id)
         .await
         .expect("find persisted auction")
@@ -407,15 +407,15 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
 #[tokio::test]
 async fn get_auction_by_id_returns_auction_response() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-2".to_string(),
         seller_id: "seller-2".to_string(),
@@ -429,7 +429,7 @@ async fn get_auction_by_id_returns_auction_response() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -467,15 +467,15 @@ async fn get_auction_by_id_returns_auction_response() {
 #[tokio::test]
 async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-gateway".to_string(),
         seller_id: "seller-gateway".to_string(),
@@ -489,7 +489,7 @@ async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -527,14 +527,14 @@ async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
 #[tokio::test]
 async fn api_v1_list_auctions_returns_gateway_compatible_page() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
-    let first_auction = NewAuctionRecord {
+    let first_auction = NewListingAuctionSessionRecord {
         id: "auction-list-1".to_string(),
         listing_id: "listing-list-1".to_string(),
         seller_id: "seller-list-1".to_string(),
@@ -548,7 +548,7 @@ async fn api_v1_list_auctions_returns_gateway_compatible_page() {
         created_at: now,
         updated_at: now,
     };
-    let second_auction = NewAuctionRecord {
+    let second_auction = NewListingAuctionSessionRecord {
         id: "auction-list-2".to_string(),
         listing_id: "listing-list-2".to_string(),
         seller_id: "seller-list-2".to_string(),
@@ -562,11 +562,11 @@ async fn api_v1_list_auctions_returns_gateway_compatible_page() {
         created_at: now + 1,
         updated_at: now + 1,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&first_auction)
         .await
         .expect("insert first auction");
-    auction_repo
+    listing_auction_session_repo
         .insert(&second_auction)
         .await
         .expect("insert second auction");
@@ -610,15 +610,15 @@ async fn api_v1_list_auctions_returns_gateway_compatible_page() {
 #[tokio::test]
 async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-3".to_string(),
         seller_id: "seller-3".to_string(),
@@ -632,7 +632,7 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -690,15 +690,15 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
 #[tokio::test]
 async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-bid-gateway".to_string(),
         seller_id: "seller-bid-gateway".to_string(),
@@ -712,7 +712,7 @@ async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response()
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -758,15 +758,15 @@ async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response()
 #[tokio::test]
 async fn api_v1_place_bid_uses_trusted_gateway_user_header() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-bid-trusted".to_string(),
         seller_id: "seller-bid-trusted".to_string(),
@@ -780,7 +780,7 @@ async fn api_v1_place_bid_uses_trusted_gateway_user_header() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -815,15 +815,15 @@ async fn api_v1_place_bid_uses_trusted_gateway_user_header() {
 #[tokio::test]
 async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-bid-conflict".to_string(),
         seller_id: "seller-bid-conflict".to_string(),
@@ -837,7 +837,7 @@ async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -866,16 +866,16 @@ async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
 #[tokio::test]
 async fn api_v1_place_bid_rejects_seller_bidding_own_auction() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-self-bid".to_string(),
             seller_id: "seller-self-bid".to_string(),
@@ -915,16 +915,16 @@ async fn api_v1_place_bid_rejects_seller_bidding_own_auction() {
 #[tokio::test]
 async fn api_v1_place_proxy_bid_rejects_seller_bidding_own_auction() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-self-proxy".to_string(),
             seller_id: "seller-self-proxy".to_string(),
@@ -964,15 +964,15 @@ async fn api_v1_place_proxy_bid_rejects_seller_bidding_own_auction() {
 #[tokio::test]
 async fn list_bids_returns_bid_history_for_auction() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-4".to_string(),
         seller_id: "seller-4".to_string(),
@@ -986,7 +986,7 @@ async fn list_bids_returns_bid_history_for_auction() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -1042,15 +1042,15 @@ async fn list_bids_returns_bid_history_for_auction() {
 #[tokio::test]
 async fn list_bids_cursor_returns_paginated_bid_history() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-cursor".to_string(),
         seller_id: "seller-cursor".to_string(),
@@ -1064,7 +1064,7 @@ async fn list_bids_cursor_returns_paginated_bid_history() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -1151,16 +1151,16 @@ async fn list_bids_cursor_returns_paginated_bid_history() {
 #[tokio::test]
 async fn place_proxy_bid_places_increment_over_current_winner() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-proxy".to_string(),
             seller_id: "seller-proxy".to_string(),
@@ -1216,15 +1216,15 @@ async fn place_proxy_bid_places_increment_over_current_winner() {
 #[tokio::test]
 async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-close".to_string(),
         seller_id: "seller-close".to_string(),
@@ -1238,7 +1238,7 @@ async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
         created_at: now - 3_600,
         updated_at: now - 60,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -1273,7 +1273,7 @@ async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
     assert_eq!(response_body["status"], json!("WON"));
     assert_eq!(response_body["current_highest_bid_cents"], json!(5500));
 
-    let persisted = auction_repo
+    let persisted = listing_auction_session_repo
         .find_by_id(&auction_id)
         .await
         .expect("find auction")
@@ -1284,15 +1284,15 @@ async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
 #[tokio::test]
 async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: "pending-close".to_string(),
             listing_id: "listing-pending".to_string(),
             seller_id: "seller-pending".to_string(),
@@ -1308,8 +1308,8 @@ async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
         })
         .await
         .expect("insert pending auction");
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: "future-close".to_string(),
             listing_id: "listing-future".to_string(),
             seller_id: "seller-future".to_string(),
@@ -1325,8 +1325,8 @@ async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
         })
         .await
         .expect("insert future auction");
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: "already-won".to_string(),
             listing_id: "listing-won".to_string(),
             seller_id: "seller-won".to_string(),

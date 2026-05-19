@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
+use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
@@ -50,19 +50,19 @@ async fn setup_test_db() -> sqlx::AnyPool {
 #[ignore = "manual load harness"]
 async fn run_seeded_bidding_load_harness() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
     let service = Arc::new(AuctionService::new(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
     ));
 
     let now = chrono::Utc::now().timestamp();
     let auction_id = "auction-load-seeded".to_string();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-load-seeded".to_string(),
             seller_id: "seller-load-seeded".to_string(),

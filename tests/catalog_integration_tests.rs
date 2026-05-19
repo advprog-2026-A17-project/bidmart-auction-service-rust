@@ -4,7 +4,7 @@ use sqlx::AnyPool;
 
 use bidmart_auction_service_rust::client::{CatalogClient, CatalogClientError, ListingSummary};
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::{
     AuctionService, CreateAuctionCommand,
@@ -78,19 +78,19 @@ fn create_command() -> CreateAuctionCommand {
 
 async fn service_with_catalog(
     catalog_client: Arc<dyn CatalogClient>,
-) -> (AuctionService, AuctionRepository) {
+) -> (AuctionService, ListingAuctionSessionRepository) {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
     let service = AuctionService::new_with_catalog(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo,
         outbox_repo,
         catalog_client,
     );
 
-    (service, auction_repo)
+    (service, listing_auction_session_repo)
 }
 
 #[tokio::test]
@@ -101,7 +101,7 @@ async fn create_auction_rejects_inactive_catalog_listing() {
         seller_id: command.seller_id.clone(),
         status: "CANCELLED".to_string(),
     }));
-    let (service, auction_repo) = service_with_catalog(catalog_client).await;
+    let (service, listing_auction_session_repo) = service_with_catalog(catalog_client).await;
 
     let result = service.create_auction(command).await;
 
@@ -113,7 +113,7 @@ async fn create_auction_rejects_inactive_catalog_listing() {
             .contains("Listing is not active")
     );
     assert!(
-        auction_repo
+        listing_auction_session_repo
             .list_all()
             .await
             .expect("list auctions")
@@ -129,7 +129,7 @@ async fn create_auction_rejects_catalog_seller_mismatch() {
         seller_id: "different-seller".to_string(),
         status: "ACTIVE".to_string(),
     }));
-    let (service, auction_repo) = service_with_catalog(catalog_client).await;
+    let (service, listing_auction_session_repo) = service_with_catalog(catalog_client).await;
 
     let result = service.create_auction(command).await;
 
@@ -141,7 +141,7 @@ async fn create_auction_rejects_catalog_seller_mismatch() {
             .contains("Listing seller does not match auction seller")
     );
     assert!(
-        auction_repo
+        listing_auction_session_repo
             .list_all()
             .await
             .expect("list auctions")
@@ -157,7 +157,7 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
         seller_id: command.seller_id.clone(),
         status: "ACTIVE".to_string(),
     }));
-    let (service, auction_repo) = service_with_catalog(catalog_client).await;
+    let (service, listing_auction_session_repo) = service_with_catalog(catalog_client).await;
 
     let auction = service
         .create_auction(command.clone())
@@ -167,7 +167,7 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
     assert_eq!(auction.listing_id, command.listing_id);
     assert_eq!(auction.seller_id, command.seller_id);
     assert_eq!(
-        auction_repo.list_all().await.expect("list auctions").len(),
+        listing_auction_session_repo.list_all().await.expect("list auctions").len(),
         1
     );
 }

@@ -9,7 +9,7 @@ use crate::client::{
     HttpWalletClient, WalletClient, WalletClientError,
 };
 use crate::http::router::create_router;
-use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
+use crate::persistence::repositories::{ListingAuctionSessionRepository, BidRepository, OutboxRepository};
 use crate::service::auction_service::AuctionService;
 
 pub fn default_database_url() -> String {
@@ -17,7 +17,7 @@ pub fn default_database_url() -> String {
 }
 
 pub fn build_router(pool: AnyPool) -> (Router, AuctionService) {
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
     let catalog_grpc_url = env::var("CATALOGUE_GRPC_URL").ok();
@@ -31,7 +31,7 @@ pub fn build_router(pool: AnyPool) -> (Router, AuctionService) {
         wallet_client_from_endpoints(wallet_grpc_url.as_deref(), wallet_http_url.as_deref())
             .expect("WALLET_GRPC_URL or WALLET_SERVICE_URL must be valid");
     let auction_service = AuctionService::new_with_clients(
-        auction_repo,
+        listing_auction_session_repo,
         bid_repo,
         outbox_repo,
         wallet_client,

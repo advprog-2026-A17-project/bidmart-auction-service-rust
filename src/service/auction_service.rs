@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::auction::{Auction, BidError, Money, UnixSeconds, UserId};
+use crate::listing_auction_session::{ListingAuctionSession, BidError, Money, UnixSeconds, UserId};
 use crate::client::{CatalogClient, HoldFundsRequest, ListingSummary, WalletClient};
 use crate::persistence::models::{
-    AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+    ListingAuctionSessionRecord, BidRecord, NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
 };
-use crate::persistence::repositories::{AuctionRepository, BidRepository, OutboxRepository};
+use crate::persistence::repositories::{ListingAuctionSessionRepository, BidRepository, OutboxRepository};
 use crate::service::auction_strategy::{AuctionType, resolve_strategy};
 use crate::service::bid_policies::{
     AmountBidPolicy, IdentityBidPolicy, TimeBidPolicy, WalletBidPolicy,
@@ -16,7 +16,7 @@ use tokio::sync::OwnedMutexGuard;
 
 #[derive(Clone)]
 pub struct AuctionService {
-    auction_repo: AuctionRepository,
+    listing_auction_session_repo: ListingAuctionSessionRepository,
     bid_repo: BidRepository,
     outbox_repo: OutboxRepository,
     wallet_client: Option<Arc<dyn WalletClient>>,
@@ -27,7 +27,7 @@ pub struct AuctionService {
 impl std::fmt::Debug for AuctionService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuctionService")
-            .field("auction_repo", &"<AuctionRepository>")
+            .field("listing_auction_session_repo", &"<ListingAuctionSessionRepository>")
             .field("bid_repo", &"<BidRepository>")
             .field("outbox_repo", &"<OutboxRepository>")
             .field("wallet_client", &"<WalletClient>")
@@ -39,21 +39,21 @@ impl std::fmt::Debug for AuctionService {
 
 impl AuctionService {
     pub fn new(
-        auction_repo: AuctionRepository,
+        listing_auction_session_repo: ListingAuctionSessionRepository,
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
     ) -> Self {
-        Self::new_with_clients(auction_repo, bid_repo, outbox_repo, None, None)
+        Self::new_with_clients(listing_auction_session_repo, bid_repo, outbox_repo, None, None)
     }
 
     pub fn new_with_wallet(
-        auction_repo: AuctionRepository,
+        listing_auction_session_repo: ListingAuctionSessionRepository,
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
         wallet_client: Arc<dyn WalletClient>,
     ) -> Self {
         Self::new_with_clients(
-            auction_repo,
+            listing_auction_session_repo,
             bid_repo,
             outbox_repo,
             Some(wallet_client),
@@ -62,13 +62,13 @@ impl AuctionService {
     }
 
     pub fn new_with_catalog(
-        auction_repo: AuctionRepository,
+        listing_auction_session_repo: ListingAuctionSessionRepository,
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
         catalog_client: Arc<dyn CatalogClient>,
     ) -> Self {
         Self::new_with_clients(
-            auction_repo,
+            listing_auction_session_repo,
             bid_repo,
             outbox_repo,
             None,
@@ -77,14 +77,14 @@ impl AuctionService {
     }
 
     pub fn new_with_clients(
-        auction_repo: AuctionRepository,
+        listing_auction_session_repo: ListingAuctionSessionRepository,
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
         wallet_client: Option<Arc<dyn WalletClient>>,
         catalog_client: Option<Arc<dyn CatalogClient>>,
     ) -> Self {
         Self {
-            auction_repo,
+            listing_auction_session_repo,
             bid_repo,
             outbox_repo,
             wallet_client,
@@ -96,7 +96,7 @@ impl AuctionService {
     pub async fn create_auction(
         &self,
         command: CreateAuctionCommand,
-    ) -> Result<AuctionRecord, CreateAuctionError> {
+    ) -> Result<ListingAuctionSessionRecord, CreateAuctionError> {
         command.validate()?;
         let auction_type = AuctionType::from_input(Some(&command.auction_type))
             .map_err(CreateAuctionError::InvalidInput)?;
@@ -104,7 +104,7 @@ impl AuctionService {
         self.validate_listing_for_auction(&command).await?;
 
         if let Some(existing) = self
-            .auction_repo
+            .listing_auction_session_repo
             .find_by_listing_id(&command.listing_id)
             .await
             .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))?
@@ -114,7 +114,7 @@ impl AuctionService {
 
         let now = chrono::Utc::now().timestamp();
         let listing_id = command.listing_id.clone();
-        let auction = NewAuctionRecord {
+        let auction = NewListingAuctionSessionRecord {
             id: listing_id.clone(),
             listing_id,
             seller_id: command.seller_id,
@@ -130,7 +130,7 @@ impl AuctionService {
         };
 
         let inserted = self
-            .auction_repo
+            .listing_auction_session_repo
             .insert(&auction)
             .await
             .map_err(|error| CreateAuctionError::DatabaseError(error.to_string()))?;
@@ -164,33 +164,33 @@ impl AuctionService {
     pub async fn get_auction_by_id(
         &self,
         auction_id: &str,
-    ) -> Result<Option<AuctionRecord>, GetAuctionError> {
+    ) -> Result<Option<ListingAuctionSessionRecord>, GetListingAuctionSessionError> {
         let found = self
-            .auction_repo
+            .listing_auction_session_repo
             .find_by_id(auction_id)
             .await
-            .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))?;
+            .map_err(|error| GetListingAuctionSessionError::DatabaseError(error.to_string()))?;
         if found.is_some() {
             return Ok(found);
         }
-        self.auction_repo
+        self.listing_auction_session_repo
             .find_by_listing_id(auction_id)
             .await
-            .map_err(|error| GetAuctionError::DatabaseError(error.to_string()))
+            .map_err(|error| GetListingAuctionSessionError::DatabaseError(error.to_string()))
     }
 
-    pub async fn list_auctions(&self) -> Result<Vec<AuctionRecord>, ListAuctionsError> {
-        self.auction_repo
+    pub async fn list_auctions(&self) -> Result<Vec<ListingAuctionSessionRecord>, ListListingAuctionSessionsError> {
+        self.listing_auction_session_repo
             .list_all()
             .await
-            .map_err(|error| ListAuctionsError::DatabaseError(error.to_string()))
+            .map_err(|error| ListListingAuctionSessionsError::DatabaseError(error.to_string()))
     }
 
     pub async fn list_pending_closure(
         &self,
-    ) -> Result<Vec<AuctionRecord>, ListPendingClosureError> {
+    ) -> Result<Vec<ListingAuctionSessionRecord>, ListPendingClosureError> {
         let now = chrono::Utc::now().timestamp();
-        self.auction_repo
+        self.listing_auction_session_repo
             .list_pending_closure(now)
             .await
             .map_err(|error| ListPendingClosureError::DatabaseError(error.to_string()))
@@ -199,17 +199,24 @@ impl AuctionService {
     pub async fn close_auction(
         &self,
         auction_id: &str,
-    ) -> Result<AuctionRecord, CloseAuctionError> {
+    ) -> Result<ListingAuctionSessionRecord, CloseListingAuctionSessionError> {
         let auction = self
-            .auction_repo
+            .listing_auction_session_repo
             .find_by_id(auction_id)
             .await
-            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?
-            .ok_or(CloseAuctionError::AuctionNotFound)?;
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?
+            .or(
+                self.listing_auction_session_repo
+                    .find_by_listing_id(auction_id)
+                    .await
+                    .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?,
+            )
+            .ok_or(CloseListingAuctionSessionError::AuctionNotFound)?;
+        let canonical_auction_id = auction.id.clone();
 
         let now = chrono::Utc::now().timestamp();
         if auction.end_time > now {
-            return Err(CloseAuctionError::AuctionNotEnded);
+            return Err(CloseListingAuctionSessionError::AuctionNotEnded);
         }
 
         if auction.status == "WON" || auction.status == "UNSOLD" {
@@ -218,9 +225,9 @@ impl AuctionService {
 
         let bids = self
             .bid_repo
-            .list_by_auction_id_desc(auction_id)
+            .list_by_auction_id_desc(&canonical_auction_id)
             .await
-            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
         let winning_bid = bids.first();
         let highest_bid_cents = winning_bid
             .map(|bid| bid.bid_amount_cents)
@@ -235,10 +242,10 @@ impl AuctionService {
         };
 
         let updated = self
-            .auction_repo
-            .update_lifecycle_status(auction_id, status, highest_bid_cents, now)
+            .listing_auction_session_repo
+            .update_lifecycle_status(&canonical_auction_id, status, highest_bid_cents, now)
             .await
-            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
 
         if let Some(wallet_client) = &self.wallet_client {
             if status == "WON" {
@@ -246,7 +253,7 @@ impl AuctionService {
                     wallet_client
                         .convert_hold_to_payment(hold_id)
                         .await
-                        .map_err(|error| CloseAuctionError::WalletError(error.to_string()))?;
+                        .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                 }
             } else {
                 for bid in &bids {
@@ -254,7 +261,7 @@ impl AuctionService {
                         wallet_client
                             .release_hold(hold_id)
                             .await
-                            .map_err(|error| CloseAuctionError::WalletError(error.to_string()))?;
+                            .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                     }
                 }
             }
@@ -262,14 +269,27 @@ impl AuctionService {
 
         self.publish_auction_ended_event(&updated, winning_bid)
             .await
-            .map_err(|error| CloseAuctionError::DatabaseError(error.to_string()))?;
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
 
         Ok(updated)
     }
 
     pub async fn list_bids(&self, auction_id: &str) -> Result<Vec<BidRecord>, ListBidsError> {
+        let canonical_auction_id = self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
+            .or(
+                self.listing_auction_session_repo
+                    .find_by_listing_id(auction_id)
+                    .await
+                    .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?,
+            )
+            .map(|record| record.id)
+            .unwrap_or_else(|| auction_id.to_string());
         self.bid_repo
-            .list_by_auction_id_desc(auction_id)
+            .list_by_auction_id_desc(&canonical_auction_id)
             .await
             .map_err(|error| ListBidsError::DatabaseError(error.to_string()))
     }
@@ -280,6 +300,19 @@ impl AuctionService {
         cursor: Option<&str>,
         limit: Option<i64>,
     ) -> Result<BidCursorPage, ListBidsError> {
+        let canonical_auction_id = self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
+            .or(
+                self.listing_auction_session_repo
+                    .find_by_listing_id(auction_id)
+                    .await
+                    .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?,
+            )
+            .map(|record| record.id)
+            .unwrap_or_else(|| auction_id.to_string());
         let sanitized_limit = limit.unwrap_or(20).clamp(1, 100);
         let parsed_cursor = match cursor {
             Some(value) => Some(parse_bid_cursor(value).map_err(ListBidsError::InvalidInput)?),
@@ -289,7 +322,7 @@ impl AuctionService {
         let mut bids = self
             .bid_repo
             .list_by_auction_cursor(
-                auction_id,
+                &canonical_auction_id,
                 parsed_cursor.map(|cursor| (cursor.amount_cents, cursor.bid_time, cursor.id)),
                 sanitized_limit + 1,
             )
@@ -357,12 +390,25 @@ impl AuctionService {
         bid_time: i64,
         mode: BidPlacementMode,
     ) -> Result<BidRecord, PlaceBidError> {
-        let _bid_guard = self.auction_bid_guard(auction_id).await;
+        let resolved_record = self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
+            .or(
+                self.listing_auction_session_repo
+                    .find_by_listing_id(auction_id)
+                    .await
+                    .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?,
+            )
+            .ok_or(PlaceBidError::AuctionNotFound)?;
+        let canonical_auction_id = resolved_record.id.clone();
+        let _bid_guard = self.auction_bid_guard(&canonical_auction_id).await;
 
         if let BidPlacementMode::Standard { amount_cents } = mode {
             if let Some(existing_bid) = self
                 .bid_repo
-                .find_matching_bid(auction_id, bidder_id, amount_cents, bid_time)
+                .find_matching_bid(&canonical_auction_id, bidder_id, amount_cents, bid_time)
                 .await
                 .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
             {
@@ -371,8 +417,8 @@ impl AuctionService {
         }
 
         let auction_record = self
-            .auction_repo
-            .find_by_id(auction_id)
+            .listing_auction_session_repo
+            .find_by_id(&canonical_auction_id)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
             .ok_or(PlaceBidError::AuctionNotFound)?;
@@ -381,7 +427,7 @@ impl AuctionService {
 
         let previous_winning_bid = self
             .bid_repo
-            .find_winning_bid(auction_id)
+            .find_winning_bid(&canonical_auction_id)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
@@ -428,7 +474,7 @@ impl AuctionService {
                 user_id: bidder_id.to_string(),
                 role: Some("BUYER".to_string()),
                 hold_id: uuid::Uuid::new_v4().to_string(),
-                auction_id: auction_id.to_string(),
+                auction_id: canonical_auction_id.clone(),
                 bid_id: bid_id.clone(),
                 amount: accepted_bid_amount_cents as u64,
                 expires_at: "2026-12-31T23:59:59Z".to_string(),
@@ -446,7 +492,7 @@ impl AuctionService {
 
         let bid_record = NewBidRecord {
             id: bid_id,
-            auction_id: auction_id.to_string(),
+            auction_id: canonical_auction_id.clone(),
             bidder_id: bidder_id.to_string(),
             bid_amount_cents: accepted_bid_amount_cents,
             bid_time,
@@ -484,7 +530,7 @@ impl AuctionService {
         updated_record.status = self.status_to_string(auction.status());
         updated_record.updated_at = bid_time;
 
-        let persisted_update = sqlx::query_as::<_, AuctionRecord>(
+        let persisted_update = sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "UPDATE listings \
              SET current_highest_bid_cents = $1, end_time = $2, lifecycle_state = $3, updated_at = $4 \
              WHERE id = $5 AND (current_highest_bid_cents IS NULL OR current_highest_bid_cents < $6) \
@@ -495,16 +541,16 @@ impl AuctionService {
         .bind(updated_record.end_time)
         .bind(&updated_record.status)
         .bind(updated_record.updated_at)
-        .bind(auction_id)
+        .bind(&canonical_auction_id)
         .bind(new_highest_cents)
-        .fetch_optional(&self.auction_repo.pool)
+        .fetch_optional(&self.listing_auction_session_repo.pool)
         .await
         .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
         updated_record = match persisted_update {
             Some(record) => record,
             None => self
-                .auction_repo
-                .find_by_id(auction_id)
+                .listing_auction_session_repo
+                .find_by_id(&canonical_auction_id)
                 .await
                 .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
                 .unwrap_or(updated_record),
@@ -520,15 +566,15 @@ impl AuctionService {
 
     async fn record_to_domain_with_bid(
         &self,
-        record: &AuctionRecord,
-    ) -> Result<Auction, sqlx::Error> {
+        record: &ListingAuctionSessionRecord,
+    ) -> Result<ListingAuctionSession, sqlx::Error> {
         let status = match record.status.as_str() {
-            "SCHEDULED" => crate::auction::AuctionStatus::Scheduled,
-            "ACTIVE" => crate::auction::AuctionStatus::Active,
-            "EXTENDED" => crate::auction::AuctionStatus::Extended,
-            "ENDED" => crate::auction::AuctionStatus::Ended,
-            "CANCELLED" => crate::auction::AuctionStatus::Cancelled,
-            _ => crate::auction::AuctionStatus::Scheduled,
+            "SCHEDULED" => crate::listing_auction_session::ListingAuctionSessionStatus::Scheduled,
+            "ACTIVE" => crate::listing_auction_session::ListingAuctionSessionStatus::Active,
+            "EXTENDED" => crate::listing_auction_session::ListingAuctionSessionStatus::Extended,
+            "ENDED" => crate::listing_auction_session::ListingAuctionSessionStatus::Ended,
+            "CANCELLED" => crate::listing_auction_session::ListingAuctionSessionStatus::Cancelled,
+            _ => crate::listing_auction_session::ListingAuctionSessionStatus::Scheduled,
         };
 
         // Fetch current highest bid from database
@@ -536,13 +582,13 @@ impl AuctionService {
             .bid_repo
             .find_winning_bid(&record.id)
             .await?
-            .map(|bid_record| crate::auction::Bid {
+            .map(|bid_record| crate::listing_auction_session::Bid {
                 bidder_id: UserId::new(bid_record.bidder_id),
                 amount: Money::from_cents(bid_record.bid_amount_cents as u64),
                 placed_at: UnixSeconds::new(bid_record.bid_time as u64),
             });
 
-        Ok(Auction::with_status(
+        Ok(ListingAuctionSession::with_status(
             &record.id,
             &record.listing_id,
             &record.seller_id,
@@ -585,13 +631,13 @@ impl AuctionService {
         Ok(Some(listing))
     }
 
-    fn status_to_string(&self, status: crate::auction::AuctionStatus) -> String {
+    fn status_to_string(&self, status: crate::listing_auction_session::ListingAuctionSessionStatus) -> String {
         match status {
-            crate::auction::AuctionStatus::Scheduled => "SCHEDULED".to_string(),
-            crate::auction::AuctionStatus::Active => "ACTIVE".to_string(),
-            crate::auction::AuctionStatus::Extended => "EXTENDED".to_string(),
-            crate::auction::AuctionStatus::Ended => "ENDED".to_string(),
-            crate::auction::AuctionStatus::Cancelled => "CANCELLED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Scheduled => "SCHEDULED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Active => "ACTIVE".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Extended => "EXTENDED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Ended => "ENDED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Cancelled => "CANCELLED".to_string(),
         }
     }
 
@@ -600,9 +646,14 @@ impl AuctionService {
         &self,
         auction_id: &str,
     ) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
-        match self.auction_repo.find_by_id(auction_id).await? {
+        match self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await?
+            .or(self.listing_auction_session_repo.find_by_listing_id(auction_id).await?)
+        {
             Some(auction) => {
-                let bids = self.bid_repo.list_by_auction_id_desc(auction_id).await?;
+                let bids = self.bid_repo.list_by_auction_id_desc(&auction.id).await?;
                 let bid_ids: Vec<String> = bids.iter().map(|b| b.id.clone()).collect();
                 Ok(Some((auction.id, bid_ids)))
             }
@@ -612,7 +663,7 @@ impl AuctionService {
 
     async fn publish_bid_placed_event(
         &self,
-        auction: &AuctionRecord,
+        auction: &ListingAuctionSessionRecord,
         bid: &BidRecord,
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
@@ -645,7 +696,7 @@ impl AuctionService {
 
     async fn publish_auction_created_event(
         &self,
-        auction: &AuctionRecord,
+        auction: &ListingAuctionSessionRecord,
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({
@@ -677,7 +728,7 @@ impl AuctionService {
 
     async fn publish_auction_ended_event(
         &self,
-        auction: &AuctionRecord,
+        auction: &ListingAuctionSessionRecord,
         winning_bid: Option<&BidRecord>,
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
@@ -861,13 +912,13 @@ pub enum CreateAuctionError {
 }
 
 #[derive(Debug, Error)]
-pub enum GetAuctionError {
+pub enum GetListingAuctionSessionError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 }
 
 #[derive(Debug, Error)]
-pub enum ListAuctionsError {
+pub enum ListListingAuctionSessionsError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 }
@@ -879,10 +930,10 @@ pub enum ListPendingClosureError {
 }
 
 #[derive(Debug, Error)]
-pub enum CloseAuctionError {
-    #[error("Auction not found")]
+pub enum CloseListingAuctionSessionError {
+    #[error("ListingAuctionSession not found")]
     AuctionNotFound,
-    #[error("Auction has not reached its end time")]
+    #[error("ListingAuctionSession has not reached its end time")]
     AuctionNotEnded,
     #[error("Wallet error: {0}")]
     WalletError(String),
@@ -910,7 +961,7 @@ pub enum PlaceBidError {
 impl std::fmt::Display for PlaceBidError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PlaceBidError::AuctionNotFound => write!(f, "Auction not found"),
+            PlaceBidError::AuctionNotFound => write!(f, "ListingAuctionSession not found"),
             PlaceBidError::BidError(e) => write!(f, "{:?}", e),
             PlaceBidError::CatalogError(e) => write!(f, "Catalog error: {}", e),
             PlaceBidError::WalletError(e) => write!(f, "Wallet error: {}", e),

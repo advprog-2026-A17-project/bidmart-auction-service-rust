@@ -1,7 +1,7 @@
 use sqlx::{FromRow, Row, any::AnyRow};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuctionRecord {
+pub struct ListingAuctionSessionRecord {
     pub id: String,
     pub listing_id: String,
     pub seller_id: String,
@@ -18,7 +18,7 @@ pub struct AuctionRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewAuctionRecord {
+pub struct NewListingAuctionSessionRecord {
     pub id: String,
     pub listing_id: String,
     pub seller_id: String,
@@ -107,7 +107,7 @@ fn bool_from_row(row: &AnyRow, column: &str) -> Result<bool, sqlx::Error> {
     }
 }
 
-impl<'r> FromRow<'r, AnyRow> for AuctionRecord {
+impl<'r> FromRow<'r, AnyRow> for ListingAuctionSessionRecord {
     fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
         let id: String = row.try_get("id")?;
         let listing_id = row

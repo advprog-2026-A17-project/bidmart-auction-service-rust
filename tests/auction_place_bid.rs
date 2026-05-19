@@ -1,9 +1,9 @@
-use bidmart_auction_service_rust::auction::{
-    Auction, AuctionOutcome, AuctionStateError, AuctionStatus, BidError, Money, UnixSeconds, UserId,
+use bidmart_auction_service_rust::listing_auction_session::{
+    ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStateError, ListingAuctionSessionStatus, BidError, Money, UnixSeconds, UserId,
 };
 
-fn sample_auction(start_at: u64, end_at: u64) -> Auction {
-    Auction::new(
+fn sample_auction(start_at: u64, end_at: u64) -> ListingAuctionSession {
+    ListingAuctionSession::new(
         "auction-1",
         "listing-1",
         "seller-1",
@@ -16,7 +16,7 @@ fn sample_auction(start_at: u64, end_at: u64) -> Auction {
     )
 }
 
-fn activate_auction(auction: &mut Auction, now: u64) {
+fn activate_auction(auction: &mut ListingAuctionSession, now: u64) {
     auction
         .activate(UnixSeconds::new(now))
         .expect("auction should activate");
@@ -35,7 +35,7 @@ fn reject_bid_when_scheduled() {
     assert!(matches!(
         result,
         Err(BidError::AuctionNotActive {
-            status: AuctionStatus::Scheduled
+            status: ListingAuctionSessionStatus::Scheduled
         })
     ));
 }
@@ -46,7 +46,7 @@ fn reject_activation_before_start() {
 
     let result = auction.activate(UnixSeconds::new(50));
 
-    assert!(matches!(result, Err(AuctionStateError::TooEarly { .. })));
+    assert!(matches!(result, Err(ListingAuctionSessionStateError::TooEarly { .. })));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn accept_first_bid_at_starting_price() {
         auction.current_highest().unwrap().amount,
         Money::from_cents(10_00)
     );
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -180,12 +180,12 @@ fn extend_auction_when_bid_in_last_two_minutes() {
     assert!(result.extended);
     assert_eq!(result.new_end_at, UnixSeconds::new(370));
     assert_eq!(auction.end_at(), UnixSeconds::new(370));
-    assert_eq!(auction.status(), AuctionStatus::Extended);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Extended);
 }
 
 #[test]
 fn stop_extending_after_extension_cap() {
-    let mut auction = Auction::new(
+    let mut auction = ListingAuctionSession::new(
         "auction-2",
         "listing-2",
         "seller-2",
@@ -236,7 +236,7 @@ fn reject_bid_when_cancelled() {
     assert!(matches!(
         result,
         Err(BidError::AuctionNotActive {
-            status: AuctionStatus::Cancelled
+            status: ListingAuctionSessionStatus::Cancelled
         })
     ));
 }
@@ -258,14 +258,14 @@ fn reject_bid_after_end_time() {
 #[test]
 fn scheduled_status_on_creation() {
     let auction = sample_auction(100, 200);
-    assert_eq!(auction.status(), AuctionStatus::Scheduled);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Scheduled);
 }
 
 #[test]
 fn active_status_after_activation() {
     let mut auction = sample_auction(100, 200);
     activate_auction(&mut auction, 100);
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn extended_status_when_bid_in_anti_snipe_window() {
         )
         .expect("bid should be accepted");
 
-    assert_eq!(auction.status(), AuctionStatus::Extended);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Extended);
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn remains_active_when_bid_not_in_anti_snipe_window() {
         )
         .expect("bid should be accepted");
 
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn auction_cannot_be_reactivated() {
 
     let result = auction.activate(UnixSeconds::new(150));
     assert!(result.is_ok()); // Activating when already active is OK
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn determine_won_when_reserve_met_after_end() {
         .expect("bid should be accepted");
 
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Won);
+    assert_eq!(result, ListingAuctionSessionOutcome::Won);
 }
 
 #[test]
@@ -341,14 +341,14 @@ fn determine_unsold_when_reserve_not_met() {
         .expect("bid should be accepted");
 
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Unsold);
+    assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
 }
 
 #[test]
 fn determine_unsold_when_no_bids() {
     let auction = sample_auction(0, 100);
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Unsold);
+    assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
 }
 
 #[test]

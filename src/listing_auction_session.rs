@@ -54,18 +54,18 @@ impl UnixSeconds {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AuctionId(String);
+pub struct ListingAuctionSessionId(String);
 
-impl AuctionId {
+impl ListingAuctionSessionId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ListingId(String);
+pub struct CatalogueListingId(String);
 
-impl ListingId {
+impl CatalogueListingId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -88,7 +88,7 @@ pub struct Bid {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuctionStatus {
+pub enum ListingAuctionSessionStatus {
     Scheduled,
     Active,
     Extended,
@@ -97,13 +97,13 @@ pub enum AuctionStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuctionOutcome {
+pub enum ListingAuctionSessionOutcome {
     Won,    // Reserve met and has winner
     Unsold, // Reserve not met or no bids
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum AuctionStateError {
+pub enum ListingAuctionSessionStateError {
     #[error("auction cannot start before start time")]
     TooEarly { start_at: UnixSeconds },
     #[error("auction already ended")]
@@ -115,7 +115,7 @@ pub enum AuctionStateError {
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BidError {
     #[error("auction is not active")]
-    AuctionNotActive { status: AuctionStatus },
+    AuctionNotActive { status: ListingAuctionSessionStatus },
     #[error("auction has not started yet")]
     AuctionNotStarted { start_at: UnixSeconds },
     #[error("auction already ended")]
@@ -135,9 +135,9 @@ pub struct BidAccepted {
 }
 
 #[derive(Debug, Clone)]
-pub struct Auction {
-    id: AuctionId,
-    listing_id: ListingId,
+pub struct ListingAuctionSession {
+    id: ListingAuctionSessionId,
+    listing_id: CatalogueListingId,
     seller_id: UserId,
     starting_price: Money,
     minimum_increment: Money,
@@ -145,12 +145,12 @@ pub struct Auction {
     start_at: UnixSeconds,
     end_at: UnixSeconds,
     max_extensions: u32,
-    status: AuctionStatus,
+    status: ListingAuctionSessionStatus,
     current_highest: Option<Bid>,
     extensions: u32,
 }
 
-impl Auction {
+impl ListingAuctionSession {
     pub fn new(
         id: impl Into<String>,
         listing_id: impl Into<String>,
@@ -163,8 +163,8 @@ impl Auction {
         max_extensions: u32,
     ) -> Self {
         Self {
-            id: AuctionId::new(id),
-            listing_id: ListingId::new(listing_id),
+            id: ListingAuctionSessionId::new(id),
+            listing_id: CatalogueListingId::new(listing_id),
             seller_id: UserId::new(seller_id),
             starting_price,
             minimum_increment,
@@ -172,7 +172,7 @@ impl Auction {
             start_at,
             end_at,
             max_extensions,
-            status: AuctionStatus::Scheduled,
+            status: ListingAuctionSessionStatus::Scheduled,
             current_highest: None,
             extensions: 0,
         }
@@ -188,12 +188,12 @@ impl Auction {
         start_at: UnixSeconds,
         end_at: UnixSeconds,
         max_extensions: u32,
-        status: AuctionStatus,
+        status: ListingAuctionSessionStatus,
         current_highest: Option<Bid>,
     ) -> Self {
         Self {
-            id: AuctionId::new(id),
-            listing_id: ListingId::new(listing_id),
+            id: ListingAuctionSessionId::new(id),
+            listing_id: CatalogueListingId::new(listing_id),
             seller_id: UserId::new(seller_id),
             starting_price,
             minimum_increment,
@@ -207,36 +207,36 @@ impl Auction {
         }
     }
 
-    pub fn activate(&mut self, now: UnixSeconds) -> Result<(), AuctionStateError> {
-        if self.status == AuctionStatus::Cancelled {
-            return Err(AuctionStateError::Cancelled);
+    pub fn activate(&mut self, now: UnixSeconds) -> Result<(), ListingAuctionSessionStateError> {
+        if self.status == ListingAuctionSessionStatus::Cancelled {
+            return Err(ListingAuctionSessionStateError::Cancelled);
         }
 
         if now < self.start_at {
-            return Err(AuctionStateError::TooEarly {
+            return Err(ListingAuctionSessionStateError::TooEarly {
                 start_at: self.start_at,
             });
         }
 
-        if now >= self.end_at || self.status == AuctionStatus::Ended {
-            self.status = AuctionStatus::Ended;
-            return Err(AuctionStateError::AlreadyEnded {
+        if now >= self.end_at || self.status == ListingAuctionSessionStatus::Ended {
+            self.status = ListingAuctionSessionStatus::Ended;
+            return Err(ListingAuctionSessionStateError::AlreadyEnded {
                 end_at: self.end_at,
             });
         }
 
-        if self.status == AuctionStatus::Scheduled {
-            self.status = AuctionStatus::Active;
+        if self.status == ListingAuctionSessionStatus::Scheduled {
+            self.status = ListingAuctionSessionStatus::Active;
         }
 
         Ok(())
     }
 
     pub fn cancel(&mut self) {
-        self.status = AuctionStatus::Cancelled;
+        self.status = ListingAuctionSessionStatus::Cancelled;
     }
 
-    pub fn status(&self) -> AuctionStatus {
+    pub fn status(&self) -> ListingAuctionSessionStatus {
         self.status
     }
 
@@ -270,7 +270,7 @@ impl Auction {
         amount: Money,
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
-        if self.status != AuctionStatus::Active && self.status != AuctionStatus::Extended {
+        if self.status != ListingAuctionSessionStatus::Active && self.status != ListingAuctionSessionStatus::Extended {
             return Err(BidError::AuctionNotActive {
                 status: self.status,
             });
@@ -283,7 +283,7 @@ impl Auction {
         }
 
         if now >= self.end_at {
-            self.status = AuctionStatus::Ended;
+            self.status = ListingAuctionSessionStatus::Ended;
             return Err(BidError::AuctionEnded {
                 end_at: self.end_at,
             });
@@ -357,16 +357,16 @@ impl Auction {
         if remaining <= ANTI_SNIPING_WINDOW_SECS {
             self.end_at = now.add_secs(ANTI_SNIPING_EXTENSION_SECS);
             self.extensions += 1;
-            self.status = AuctionStatus::Extended;
+            self.status = ListingAuctionSessionStatus::Extended;
             return true;
         }
         false
     }
 
-    pub fn determine_outcome(&self) -> AuctionOutcome {
+    pub fn determine_outcome(&self) -> ListingAuctionSessionOutcome {
         match &self.current_highest {
-            Some(bid) if bid.amount >= self.reserve_price => AuctionOutcome::Won,
-            _ => AuctionOutcome::Unsold,
+            Some(bid) if bid.amount >= self.reserve_price => ListingAuctionSessionOutcome::Won,
+            _ => ListingAuctionSessionOutcome::Unsold,
         }
     }
 }

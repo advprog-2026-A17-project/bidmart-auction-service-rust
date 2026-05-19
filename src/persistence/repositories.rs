@@ -1,22 +1,22 @@
 use sqlx::AnyPool;
 
 use crate::persistence::models::{
-    AuctionRecord, BidRecord, NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+    ListingAuctionSessionRecord, BidRecord, NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
     OutboxEventRecord,
 };
 
 #[derive(Debug, Clone)]
-pub struct AuctionRepository {
+pub struct ListingAuctionSessionRepository {
     pub pool: AnyPool,
 }
 
-impl AuctionRepository {
+impl ListingAuctionSessionRepository {
     pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
 
-    pub async fn insert(&self, auction: &NewAuctionRecord) -> Result<AuctionRecord, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    pub async fn insert(&self, auction: &NewListingAuctionSessionRecord) -> Result<ListingAuctionSessionRecord, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "INSERT INTO listings (id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state, start_time, end_time, created_at, updated_at) \
              VALUES ($1, $2, $3, 'ENGLISH', $4, $5, $6, $7, $8, $9, $10, $11, $12) \
@@ -39,8 +39,8 @@ impl AuctionRepository {
         .await
     }
 
-    pub async fn find_by_id(&self, id: &str) -> Result<Option<AuctionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    pub async fn find_by_id(&self, id: &str) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings WHERE id = $1",
@@ -53,8 +53,8 @@ impl AuctionRepository {
     pub async fn find_by_listing_id(
         &self,
         listing_id: &str,
-    ) -> Result<Option<AuctionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings WHERE listing_id = $1 OR id = $1 \
@@ -65,8 +65,8 @@ impl AuctionRepository {
         .await
     }
 
-    pub async fn list_all(&self) -> Result<Vec<AuctionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    pub async fn list_all(&self) -> Result<Vec<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings ORDER BY created_at DESC",
@@ -75,8 +75,8 @@ impl AuctionRepository {
         .await
     }
 
-    pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<AuctionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings \
@@ -94,8 +94,8 @@ impl AuctionRepository {
         status: &str,
         current_highest_bid_cents: Option<i64>,
         updated_at: i64,
-    ) -> Result<AuctionRecord, sqlx::Error> {
-        sqlx::query_as::<_, AuctionRecord>(
+    ) -> Result<ListingAuctionSessionRecord, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "UPDATE listings \
              SET lifecycle_state = $1, current_highest_bid_cents = $2, updated_at = $3 \
              WHERE id = $4 \

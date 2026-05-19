@@ -1,9 +1,9 @@
 use bidmart_auction_service_rust::client::{
     HoldFundsRequest, HoldResponse, WalletClient, WalletClientError,
 };
-use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
+use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 use sqlx::AnyPool;
@@ -127,13 +127,13 @@ async fn setup_test_db() -> AnyPool {
 #[tokio::test]
 async fn test_place_bid_holds_funds_from_wallet() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
     let wallet_client = Arc::new(MockWalletClient::new());
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
         wallet_client.clone(),
@@ -142,7 +142,7 @@ async fn test_place_bid_holds_funds_from_wallet() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-1".to_string(),
         seller_id: "seller-1".to_string(),
@@ -156,7 +156,7 @@ async fn test_place_bid_holds_funds_from_wallet() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -175,7 +175,7 @@ async fn test_place_bid_holds_funds_from_wallet() {
 #[tokio::test]
 async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool.clone());
 
@@ -183,7 +183,7 @@ async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
     wallet_client.set_drop_bids_on_hold(pool);
 
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo,
         outbox_repo,
         wallet_client.clone(),
@@ -192,7 +192,7 @@ async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-compensation".to_string(),
         seller_id: "seller-1".to_string(),
@@ -206,7 +206,7 @@ async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -220,7 +220,7 @@ async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
 #[tokio::test]
 async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
@@ -228,7 +228,7 @@ async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
     wallet_client.set_fail_next_hold();
 
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
         wallet_client.clone(),
@@ -237,7 +237,7 @@ async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-1".to_string(),
         seller_id: "seller-1".to_string(),
@@ -251,7 +251,7 @@ async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -270,13 +270,13 @@ async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
 #[tokio::test]
 async fn test_place_bid_persists_hold_id_and_releases_previous_highest_hold() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
     let wallet_client = Arc::new(MockWalletClient::new());
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
         wallet_client.clone(),
@@ -285,8 +285,8 @@ async fn test_place_bid_persists_hold_id_and_releases_previous_highest_hold() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-1".to_string(),
             seller_id: "seller-1".to_string(),
@@ -329,13 +329,13 @@ async fn test_place_bid_persists_hold_id_and_releases_previous_highest_hold() {
 #[tokio::test]
 async fn test_close_won_auction_converts_winning_hold() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
     let wallet_client = Arc::new(MockWalletClient::new());
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
         wallet_client.clone(),
@@ -344,8 +344,8 @@ async fn test_close_won_auction_converts_winning_hold() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-close".to_string(),
             seller_id: "seller-close".to_string(),
@@ -371,7 +371,7 @@ async fn test_close_won_auction_converts_winning_hold() {
     sqlx::query("UPDATE listings SET end_time = ? WHERE id = ?")
         .bind(now - 1)
         .bind(&auction_id)
-        .execute(&auction_repo.pool)
+        .execute(&listing_auction_session_repo.pool)
         .await
         .expect("expire auction");
 
@@ -388,13 +388,13 @@ async fn test_close_won_auction_converts_winning_hold() {
 #[tokio::test]
 async fn test_close_unsold_auction_releases_all_holds() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
     let wallet_client = Arc::new(MockWalletClient::new());
     let service = AuctionService::new_with_wallet(
-        auction_repo.clone(),
+        listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
         wallet_client.clone(),
@@ -403,8 +403,8 @@ async fn test_close_unsold_auction_releases_all_holds() {
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-unsold".to_string(),
             seller_id: "seller-unsold".to_string(),
@@ -430,7 +430,7 @@ async fn test_close_unsold_auction_releases_all_holds() {
     sqlx::query("UPDATE listings SET end_time = ? WHERE id = ?")
         .bind(now - 1)
         .bind(&auction_id)
-        .execute(&auction_repo.pool)
+        .execute(&listing_auction_session_repo.pool)
         .await
         .expect("expire auction");
 

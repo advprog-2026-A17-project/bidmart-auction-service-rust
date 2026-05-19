@@ -1,8 +1,8 @@
 use sqlx::AnyPool;
 
-use bidmart_auction_service_rust::persistence::models::NewAuctionRecord;
+use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::AuctionClosureScheduler;
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
@@ -34,15 +34,15 @@ async fn setup_test_db() -> AnyPool {
 #[tokio::test]
 async fn closure_scheduler_closes_expired_unprocessed_auctions() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(auction_repo.clone(), bid_repo, outbox_repo);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let scheduler = AuctionClosureScheduler::new(service);
 
     let now = chrono::Utc::now().timestamp();
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: "expired-unsold".to_string(),
             listing_id: "listing-expired".to_string(),
             seller_id: "seller-expired".to_string(),
@@ -64,7 +64,7 @@ async fn closure_scheduler_closes_expired_unprocessed_auctions() {
     assert_eq!(report.attempted, 1);
     assert_eq!(report.closed, 1);
     assert_eq!(report.failed, 0);
-    let auction = auction_repo
+    let auction = listing_auction_session_repo
         .find_by_id("expired-unsold")
         .await
         .expect("find auction")

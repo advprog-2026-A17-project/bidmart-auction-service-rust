@@ -14,6 +14,8 @@ use crate::service::bid_policies::{
 use thiserror::Error;
 use tokio::sync::OwnedMutexGuard;
 
+const CREATE_AUCTION_START_TIME_CLOCK_SKEW_SECONDS: i64 = 120;
+
 #[derive(Clone)]
 pub struct AuctionService {
     listing_auction_session_repo: ListingAuctionSessionRepository,
@@ -1049,7 +1051,7 @@ impl CreateAuctionCommand {
             ));
         }
 
-        if self.start_time < now {
+        if self.start_time + CREATE_AUCTION_START_TIME_CLOCK_SKEW_SECONDS < now {
             return Err(CreateAuctionError::InvalidInput(
                 "start_time must be greater than or equal to current time".to_string(),
             ));
@@ -1241,7 +1243,8 @@ mod tests {
     #[test] fn validate_reserve_eq() { let mut c = valid_command(); c.reserve_price_cents = 1000; assert!(c.validate(100).is_ok()); }
     #[test] fn validate_end_before() { let mut c = valid_command(); c.end_time = 50; assert!(c.validate(100).is_err()); }
     #[test] fn validate_end_eq() { let mut c = valid_command(); c.end_time = 100; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_start_in_past() { let mut c = valid_command(); c.start_time = 99; assert!(c.validate(100).is_err()); }
+    #[test] fn validate_start_in_past() { let mut c = valid_command(); c.start_time = 100 - CREATE_AUCTION_START_TIME_CLOCK_SKEW_SECONDS - 1; assert!(c.validate(100).is_err()); }
+    #[test] fn validate_start_allows_publish_clock_skew() { let mut c = valid_command(); c.start_time = 99; assert!(c.validate(100).is_ok()); }
     #[test] fn validate_end_not_future() { let mut c = valid_command(); c.start_time = 100; c.end_time = 100; assert!(c.validate(100).is_err()); }
 
     #[test] fn status_draft() { assert_eq!(initial_status(200, 100), "DRAFT"); }

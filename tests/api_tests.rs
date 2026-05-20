@@ -51,7 +51,7 @@ async fn create_auction_returns_created_auction_response() {
         "starting_price_cents": 1000,
         "reserve_price_cents": 5000,
         "minimum_increment_cents": 200,
-        "start_time": now - 60,
+        "start_time": now + 60,
         "end_time": now + 600
     });
 
@@ -87,8 +87,8 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(response_body["auction_type"], json!("ENGLISH"));
     assert_eq!(response_body["auctionType"], json!("ENGLISH"));
     assert_eq!(response_body["current_highest_bid_cents"], Value::Null);
-    assert_eq!(response_body["status"], json!("ACTIVE"));
-    assert_eq!(response_body["start_time"], json!(now - 60));
+    assert_eq!(response_body["status"], json!("DRAFT"));
+    assert_eq!(response_body["start_time"], json!(now + 60));
     assert_eq!(response_body["end_time"], json!(now + 600));
 
     let persisted = listing_auction_session_repo
@@ -102,7 +102,7 @@ async fn create_auction_returns_created_auction_response() {
     assert_eq!(persisted.reserve_price_cents, 5000);
     assert_eq!(persisted.minimum_increment_cents, 200);
     assert_eq!(persisted.auction_type, "ENGLISH");
-    assert_eq!(persisted.status, "ACTIVE");
+    assert_eq!(persisted.status, "DRAFT");
 }
 
 #[tokio::test]
@@ -122,7 +122,7 @@ async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
         "startingPrice": 25.5,
         "reservePrice": 50.0,
         "minimumIncrement": 2.5,
-        "start_time": now - 60,
+        "start_time": now + 60,
         "end_time": now + 600
     });
 
@@ -169,7 +169,7 @@ async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
         "startingPrice": 25.5,
         "reservePrice": 50.0,
         "minimumIncrement": 2.5,
-        "start_time": now - 60,
+        "start_time": now + 60,
         "end_time": now + 600
     });
 
@@ -281,7 +281,7 @@ async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
         "startingPrice": 25.5,
         "reservePrice": 50.0,
         "minimumIncrement": 2.5,
-        "startTime": now - 60,
+        "startTime": now + 60,
         "endTime": now + 600
     });
 
@@ -332,7 +332,7 @@ async fn api_v1_create_auction_rejects_conflicting_gateway_seller_header() {
         "startingPrice": 25.5,
         "reservePrice": 50.0,
         "minimumIncrement": 2.5,
-        "startTime": now - 60,
+        "startTime": now + 60,
         "endTime": now + 600
     });
 
@@ -369,7 +369,7 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
         "startingPrice": 25.5,
         "reservePrice": 50.0,
         "minimumIncrement": 2.5,
-        "startTime": now - 60,
+        "startTime": now + 60,
         "endTime": now + 600
     });
 
@@ -400,7 +400,7 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
         .await
         .expect("find persisted auction")
         .expect("auction persisted");
-    assert_eq!(persisted.start_time, now - 60);
+    assert_eq!(persisted.start_time, now + 60);
     assert_eq!(persisted.end_time, now + 600);
 }
 
@@ -637,6 +637,7 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
         .await
         .expect("insert auction");
 
+    let before_request_time = chrono::Utc::now().timestamp();
     let request_body = json!({
         "bidder_id": "bidder-1",
         "bid_amount_cents": 1500,
@@ -670,7 +671,12 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
     assert_eq!(response_body["auction_id"], json!(auction_id));
     assert_eq!(response_body["bidder_id"], json!("bidder-1"));
     assert_eq!(response_body["bid_amount_cents"], json!(1500));
-    assert_eq!(response_body["bid_time"], json!(now + 30));
+    let persisted_bid_time = response_body["bid_time"]
+        .as_i64()
+        .expect("response has bid_time");
+    let after_request_time = chrono::Utc::now().timestamp();
+    assert!(persisted_bid_time >= before_request_time);
+    assert!(persisted_bid_time <= after_request_time);
 
     let bids = bid_repo
         .list_by_auction_id_desc(&auction_id)
@@ -685,6 +691,57 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].aggregate_id, auction_id);
     assert_eq!(events[0].event_type, "BidPlaced");
+}
+
+#[tokio::test]
+async fn api_rejects_client_timestamp_spoofing_by_using_server_time() {
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let app = create_router(service);
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let new_auction = NewListingAuctionSessionRecord {
+        id: auction_id.clone(),
+        listing_id: "listing-bid-spoof".to_string(),
+        seller_id: "seller-bid-spoof".to_string(),
+        starting_price_cents: 1000,
+        reserve_price_cents: 5000,
+        current_highest_bid_cents: None,
+        minimum_increment_cents: 200,
+        status: "ACTIVE".to_string(),
+        start_time: now - 120,
+        end_time: now + 900,
+        created_at: now,
+        updated_at: now,
+    };
+    listing_auction_session_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert auction");
+
+    let request_body = json!({
+        "bidder_id": "bidder-1",
+        "bid_amount_cents": 1500,
+        "bid_time": now - 9_999_999
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/listings/{auction_id}/bids"))
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("build request"),
+        )
+        .await
+        .expect("call app");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
 
 #[tokio::test]

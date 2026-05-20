@@ -94,10 +94,10 @@ fn wallet_client_from_url_builds_http_wallet_client_when_configured() {
 }
 
 #[test]
-fn wallet_client_from_endpoints_prefers_grpc_wallet_client_when_configured() {
+fn wallet_client_from_endpoints_prefers_http_wallet_client_when_both_configured() {
     let client = wallet_client_from_endpoints(
         Some("http://wallet-service:50051"),
-        Some("not-a-valid-http-url"),
+        Some("http://wallet-service:8083"),
     )
     .expect("build wallet client");
 

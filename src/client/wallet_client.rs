@@ -42,6 +42,14 @@ pub struct ConvertFundsRequest {
     pub hold_id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SellerEscrowRequest {
+    pub seller_id: String,
+    pub amount_cents: u64,
+    pub correlation_id: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum WalletClientError {
     #[error("Insufficient balance: {0}")]
@@ -60,6 +68,12 @@ pub trait WalletClient: Send + Sync {
     ) -> Result<HoldResponse, WalletClientError>;
     async fn release_hold(&self, hold_id: &str) -> Result<(), WalletClientError>;
     async fn convert_hold_to_payment(&self, hold_id: &str) -> Result<(), WalletClientError>;
+    async fn credit_seller_escrow(
+        &self,
+        seller_id: &str,
+        amount_cents: u64,
+        correlation_id: &str,
+    ) -> Result<(), WalletClientError>;
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +160,40 @@ impl WalletClient for HttpWalletClient {
         if response.status.is_success() {
             Ok(())
         } else {
-            Err(WalletClientError::ServiceError("Failed to convert".into()))
+            let message = String::from_utf8_lossy(&response.body).to_string();
+            Err(WalletClientError::ServiceError(format!(
+                "Failed to convert: {message}"
+            )))
+        }
+    }
+
+    async fn credit_seller_escrow(
+        &self,
+        seller_id: &str,
+        amount_cents: u64,
+        correlation_id: &str,
+    ) -> Result<(), WalletClientError> {
+        let request = SellerEscrowRequest {
+            seller_id: seller_id.to_string(),
+            amount_cents,
+            correlation_id: Some(correlation_id.to_string()),
+        };
+        let body = serde_json::to_vec(&request)
+            .map_err(|error| WalletClientError::ServiceError(error.to_string()))?;
+
+        let response = self
+            .client
+            .post_json("/api/v1/wallet/seller-escrow".to_string(), body)
+            .await
+            .map_err(WalletClientError::from_http_error)?;
+
+        if response.status.is_success() {
+            Ok(())
+        } else {
+            let message = String::from_utf8_lossy(&response.body).to_string();
+            Err(WalletClientError::ServiceError(format!(
+                "Failed to credit seller escrow: {message}"
+            )))
         }
     }
 }
@@ -283,6 +330,19 @@ impl WalletClient for GrpcWalletClient {
             .map_err(WalletClientError::from_grpc_status)?;
 
         Ok(())
+    }
+
+    async fn credit_seller_escrow(
+        &self,
+        seller_id: &str,
+        amount_cents: u64,
+        correlation_id: &str,
+    ) -> Result<(), WalletClientError> {
+        // Post-close seller escrow requires HTTP; compose should set WALLET_SERVICE_URL
+        // and wallet_client_from_endpoints prefers HTTP when both URLs are present.
+        Err(WalletClientError::ServiceError(
+            "credit_seller_escrow requires HTTP wallet client (set WALLET_SERVICE_URL)".to_string(),
+        ))
     }
 }
 

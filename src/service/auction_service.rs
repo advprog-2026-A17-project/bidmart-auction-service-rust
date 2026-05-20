@@ -320,12 +320,26 @@ impl AuctionService {
 
         if let Some(wallet_client) = &self.wallet_client {
             if auction.status == "WON" {
-                if let Some(hold_id) = winning_bid.and_then(|bid| bid.wallet_hold_id.as_deref()) {
+                let winner = winning_bid.ok_or_else(|| {
+                    CloseListingAuctionSessionError::WalletError(
+                        "WON auction missing winning bid".to_string(),
+                    )
+                })?;
+                if let Some(hold_id) = winner.wallet_hold_id.as_deref() {
                     wallet_client
                         .convert_hold_to_payment(hold_id)
                         .await
                         .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                 }
+                let amount_cents = winner.bid_amount_cents as u64;
+                wallet_client
+                    .credit_seller_escrow(
+                        &auction.seller_id,
+                        amount_cents,
+                        &auction.id,
+                    )
+                    .await
+                    .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
             } else {
                 for bid in bids {
                     if let Some(hold_id) = &bid.wallet_hold_id {
@@ -586,16 +600,25 @@ impl AuctionService {
             }
         };
 
-        if let (Some(wallet_client), Some(previous_hold_id)) = (
-            &self.wallet_client,
-            previous_winning_bid
-                .as_ref()
-                .and_then(|bid| bid.wallet_hold_id.clone()),
-        ) {
-            wallet_client
-                .release_hold(&previous_hold_id)
+        if let Some(previous_bid) = previous_winning_bid.as_ref() {
+            if previous_bid.bidder_id != bidder_id {
+                if let (Some(wallet_client), Some(previous_hold_id)) = (
+                    &self.wallet_client,
+                    previous_bid.wallet_hold_id.as_deref(),
+                ) {
+                    wallet_client
+                        .release_hold(previous_hold_id)
+                        .await
+                        .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+                }
+                self.publish_outbid_event(
+                    &auction_record,
+                    previous_bid,
+                    accepted_bid_amount_cents,
+                )
                 .await
-                .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+            }
         }
 
         let new_highest_cents = bid_result.new_highest.amount.cents() as i64;
@@ -748,19 +771,34 @@ impl AuctionService {
             bid_amount_cents: target_amount,
             bid_time: auto_bid_time,
         };
-        let inserted = self
+        let inserted = match self
             .bid_repo
             .insert_with_wallet_hold(&bid_record, hold_id.as_deref())
             .await
-            .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
-
-        if let (Some(wallet_client), Some(previous_hold_id)) =
-            (&self.wallet_client, current_winning.wallet_hold_id.as_deref())
         {
-            wallet_client
-                .release_hold(previous_hold_id)
+            Ok(inserted) => inserted,
+            Err(error) => {
+                if let (Some(wallet_client), Some(hold_id)) =
+                    (&self.wallet_client, hold_id.as_deref())
+                {
+                    let _ = wallet_client.release_hold(hold_id).await;
+                }
+                return Err(PlaceBidError::DatabaseError(error.to_string()));
+            }
+        };
+
+        if current_winning.bidder_id != top_proxy.bidder_id {
+            if let (Some(wallet_client), Some(previous_hold_id)) =
+                (&self.wallet_client, current_winning.wallet_hold_id.as_deref())
+            {
+                wallet_client
+                    .release_hold(previous_hold_id)
+                    .await
+                    .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+            }
+            self.publish_outbid_event(current_listing, &current_winning, target_amount)
                 .await
-                .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
         }
 
         let updated_record = sqlx::query_as::<_, ListingAuctionSessionRecord>(
@@ -918,6 +956,36 @@ impl AuctionService {
         Ok(())
     }
 
+    async fn publish_outbid_event(
+        &self,
+        auction: &ListingAuctionSessionRecord,
+        previous_bid: &BidRecord,
+        new_amount_cents: i64,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({
+            "auctionId": auction.id,
+            "listingId": auction.listing_id,
+            "previousBidderId": previous_bid.bidder_id,
+            "amountCents": new_amount_cents,
+            "currentPrice": new_amount_cents,
+            "outbidAt": now
+        })
+        .to_string();
+        let event = NewOutboxEventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            aggregate_id: auction.id.clone(),
+            event_type: "Outbid".to_string(),
+            payload,
+            published: false,
+            published_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.outbox_repo.insert(&event).await?;
+        Ok(())
+    }
+
     async fn publish_auction_created_event(
         &self,
         auction: &ListingAuctionSessionRecord,
@@ -957,15 +1025,28 @@ impl AuctionService {
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
-        let payload = serde_json::json!({
-            "auctionId": auction.id,
-            "listingId": auction.listing_id,
-            "sellerId": auction.seller_id,
-            "status": auction.status,
-            "winnerId": winning_bid.map(|bid| bid.bidder_id.as_str()),
-            "finalPrice": winning_bid.map(|bid| bid.bid_amount_cents),
-            "endedAt": now
-        })
+        let reserve_met = auction.status == "WON";
+        let payload = if reserve_met {
+            serde_json::json!({
+                "auctionId": auction.id,
+                "listingId": auction.listing_id,
+                "sellerId": auction.seller_id,
+                "status": auction.status,
+                "reserveMet": true,
+                "winnerId": winning_bid.map(|bid| bid.bidder_id.as_str()),
+                "finalPrice": winning_bid.map(|bid| bid.bid_amount_cents),
+                "endedAt": now
+            })
+        } else {
+            serde_json::json!({
+                "auctionId": auction.id,
+                "listingId": auction.listing_id,
+                "sellerId": auction.seller_id,
+                "status": auction.status,
+                "reserveMet": false,
+                "endedAt": now
+            })
+        }
         .to_string();
         let event = NewOutboxEventRecord {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1080,7 +1161,9 @@ fn is_catalog_listing_biddable(status: &str) -> bool {
 }
 
 fn hold_expiration_rfc3339(end_time_unix: i64) -> String {
-    chrono::DateTime::<chrono::Utc>::from_timestamp(end_time_unix, 0)
+    let grace = crate::config::bid_hold_grace_seconds();
+    let expires_at = end_time_unix.saturating_add(grace);
+    chrono::DateTime::<chrono::Utc>::from_timestamp(expires_at, 0)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_else(|| "2099-12-31T23:59:59Z".to_string())
 }

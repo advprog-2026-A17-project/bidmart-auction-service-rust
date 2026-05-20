@@ -87,6 +87,54 @@ async fn test_service_place_bid() {
 }
 
 #[tokio::test]
+async fn place_bid_publishes_outbid_event_when_previous_bidder_outbid() {
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-outbid".to_string(),
+            seller_id: "seller-1".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now,
+            end_time: now + 300,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    service
+        .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
+        .await
+        .expect("first bid");
+    service
+        .place_bid_and_persist(&auction_id, "user-2", 1700, now + 20)
+        .await
+        .expect("outbid bid");
+
+    let events = outbox_repo.list_pending(10).await.expect("list outbox");
+    let outbid_events: Vec<_> = events
+        .iter()
+        .filter(|event| event.event_type == "Outbid")
+        .collect();
+    assert_eq!(outbid_events.len(), 1);
+    assert!(outbid_events[0].payload.contains("\"previousBidderId\":\"user-1\""));
+    assert!(outbid_events[0].payload.contains("\"amountCents\":1700"));
+}
+
+#[tokio::test]
 async fn place_bid_retry_with_same_bid_details_is_idempotent() {
     let pool = setup_test_db().await;
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
@@ -458,4 +506,55 @@ async fn close_auction_publishes_auction_ended_outbox_event() {
     assert_eq!(events[0].event_type, "AuctionEnded");
     assert!(events[0].payload.contains("\"status\":\"WON\""));
     assert!(events[0].payload.contains("\"winnerId\":\"winner\""));
+}
+
+#[tokio::test]
+async fn close_auction_unsold_publishes_auction_ended_without_winner_id() {
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+
+    let auction_id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-unsold".to_string(),
+            seller_id: "seller-unsold".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: Some(2000),
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now - 600,
+            end_time: now - 1,
+            created_at: now - 600,
+            updated_at: now - 1,
+        })
+        .await
+        .expect("insert auction");
+    bid_repo
+        .insert(&NewBidRecord {
+            id: Uuid::new_v4().to_string(),
+            auction_id: auction_id.clone(),
+            bidder_id: "bidder-below-reserve".to_string(),
+            bid_amount_cents: 2000,
+            bid_time: now - 10,
+        })
+        .await
+        .expect("insert bid");
+
+    let closed = service.close_auction(&auction_id).await.expect("close");
+
+    assert_eq!(closed.status, "UNSOLD");
+    let events = outbox_repo.list_pending(10).await.expect("list events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].aggregate_id, auction_id);
+    assert_eq!(events[0].event_type, "AuctionEnded");
+    assert!(events[0].payload.contains("\"status\":\"UNSOLD\""));
+    assert!(events[0].payload.contains("\"reserveMet\":false"));
+    assert!(!events[0].payload.contains("winnerId"));
 }

@@ -76,16 +76,18 @@ pub fn wallet_client_from_url(
     Ok(Some(Arc::new(HttpWalletClient::new(base_url)?)))
 }
 
+/// Prefer HTTP when both endpoints are configured: seller escrow and other
+/// post-close wallet operations are HTTP-only on the wallet service today.
 pub fn wallet_client_from_endpoints(
     grpc_endpoint: Option<&str>,
     http_base_url: Option<&str>,
 ) -> Result<Option<Arc<dyn WalletClient>>, WalletClientError> {
-    if let Some(grpc_endpoint) = grpc_endpoint.filter(|value| !value.trim().is_empty()) {
-        return Ok(Some(Arc::new(GrpcWalletClient::new(grpc_endpoint)?)));
-    }
-
     if let Some(http_base_url) = http_base_url.filter(|value| !value.trim().is_empty()) {
         return Ok(Some(Arc::new(HttpWalletClient::new(http_base_url)?)));
+    }
+
+    if let Some(grpc_endpoint) = grpc_endpoint.filter(|value| !value.trim().is_empty()) {
+        return Ok(Some(Arc::new(GrpcWalletClient::new(grpc_endpoint)?)));
     }
 
     Ok(None)

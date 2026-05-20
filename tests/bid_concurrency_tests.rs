@@ -39,6 +39,15 @@ impl WalletClient for DelayingWalletClient {
     async fn convert_hold_to_payment(&self, _hold_id: &str) -> Result<(), WalletClientError> {
         Ok(())
     }
+
+    async fn credit_seller_escrow(
+        &self,
+        _seller_id: &str,
+        _amount_cents: u64,
+        _correlation_id: &str,
+    ) -> Result<(), WalletClientError> {
+        Ok(())
+    }
 }
 
 async fn setup_test_db() -> AnyPool {

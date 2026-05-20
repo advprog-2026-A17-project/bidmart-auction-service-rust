@@ -29,10 +29,12 @@ impl AuctionClosureScheduler {
                     report.closed += 1;
                 }
                 Ok(None) => break,
-                Err(_) => {
+                Err(error) => {
+                    eprintln!(
+                        "auction closure failed (wallet/convert/escrow may need retry): {error}"
+                    );
                     report.attempted += 1;
                     report.failed += 1;
-                    break;
                 }
             }
         }

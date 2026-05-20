@@ -34,3 +34,11 @@ pub fn resolve_rabbitmq_url() -> String {
 pub fn resolve_events_exchange() -> String {
     env::var("BIDMART_EVENTS_EXCHANGE").unwrap_or_else(|_| "bidmart.events".to_string())
 }
+
+/// Grace period after auction end before bid holds expire (default 72 hours).
+pub fn bid_hold_grace_seconds() -> i64 {
+    env::var("BID_HOLD_GRACE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(72 * 60 * 60)
+}

@@ -14,6 +14,7 @@ pub struct MockWalletClient {
     holds: Arc<Mutex<Vec<HoldFundsRequest>>>,
     released_holds: Arc<Mutex<Vec<String>>>,
     converted_holds: Arc<Mutex<Vec<String>>>,
+    seller_escrows: Arc<Mutex<Vec<(String, u64, String)>>>,
     fail_next_hold: Arc<Mutex<bool>>,
     drop_bids_on_hold: Arc<Mutex<Option<AnyPool>>>,
 }
@@ -24,6 +25,7 @@ impl MockWalletClient {
             holds: Arc::new(Mutex::new(Vec::new())),
             released_holds: Arc::new(Mutex::new(Vec::new())),
             converted_holds: Arc::new(Mutex::new(Vec::new())),
+            seller_escrows: Arc::new(Mutex::new(Vec::new())),
             fail_next_hold: Arc::new(Mutex::new(false)),
             drop_bids_on_hold: Arc::new(Mutex::new(None)),
         }
@@ -98,6 +100,20 @@ impl WalletClient for MockWalletClient {
             .push(hold_id.to_string());
         Ok(())
     }
+
+    async fn credit_seller_escrow(
+        &self,
+        seller_id: &str,
+        amount_cents: u64,
+        correlation_id: &str,
+    ) -> Result<(), WalletClientError> {
+        self.seller_escrows.lock().unwrap().push((
+            seller_id.to_string(),
+            amount_cents,
+            correlation_id.to_string(),
+        ));
+        Ok(())
+    }
 }
 
 async fn setup_test_db() -> AnyPool {
@@ -170,9 +186,10 @@ async fn test_place_bid_holds_funds_from_wallet() {
     assert_eq!(holds[0].user_id, "user-1");
     assert_eq!(holds[0].bid_id, bid.id);
     assert_eq!(holds[0].amount, 1500);
+    let expected_expiry = now + 300 + bidmart_auction_service_rust::config::bid_hold_grace_seconds();
     assert_eq!(
         holds[0].expires_at,
-        chrono::DateTime::<chrono::Utc>::from_timestamp(now + 300, 0)
+        chrono::DateTime::<chrono::Utc>::from_timestamp(expected_expiry, 0)
             .expect("valid timestamp")
             .to_rfc3339()
     );
@@ -389,6 +406,10 @@ async fn test_close_won_auction_converts_winning_hold() {
     assert_eq!(closed.status, "WON");
     assert_eq!(wallet_client.get_converted_holds(), vec![winning_hold]);
     assert!(wallet_client.get_holds().is_empty());
+    let escrows = wallet_client.seller_escrows.lock().unwrap();
+    assert_eq!(escrows.len(), 1);
+    assert_eq!(escrows[0].0, "seller-close");
+    assert_eq!(escrows[0].1, 1700);
 }
 
 #[tokio::test]

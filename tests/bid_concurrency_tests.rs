@@ -192,3 +192,118 @@ async fn separate_service_instances_do_not_overwrite_highest_bid_with_stale_stat
         .expect("auction exists");
     assert_eq!(auction.current_highest_bid_cents, Some(2000));
 }
+
+#[tokio::test]
+async fn proxy_bid_auto_counters_later_standard_bid() {
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool.clone());
+    let service = AuctionService::new_with_wallet(
+        listing_auction_session_repo.clone(),
+        bid_repo.clone(),
+        outbox_repo,
+        Arc::new(DelayingWalletClient),
+    );
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-proxy-auto-counter".to_string(),
+            seller_id: "seller-concurrent".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now,
+            end_time: now + 300,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    service
+        .place_proxy_bid_and_persist(&auction_id, "proxy-a", 5000, now + 1)
+        .await
+        .expect("place proxy");
+    service
+        .place_bid_and_persist(&auction_id, "manual-b", 1400, now + 2)
+        .await
+        .expect("place manual bid");
+
+    let top_bid = bid_repo
+        .find_winning_bid(&auction_id)
+        .await
+        .expect("find winning bid")
+        .expect("winning bid exists");
+    assert_eq!(top_bid.bidder_id, "proxy-a");
+    assert_eq!(top_bid.bid_amount_cents, 1600);
+}
+
+#[tokio::test]
+async fn concurrent_proxy_bids_across_instances_resolve_deterministically() {
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool.clone());
+    let first_instance = AuctionService::new_with_wallet(
+        listing_auction_session_repo.clone(),
+        bid_repo.clone(),
+        outbox_repo.clone(),
+        Arc::new(DelayingWalletClient),
+    );
+    let second_instance = AuctionService::new_with_wallet(
+        listing_auction_session_repo.clone(),
+        bid_repo.clone(),
+        outbox_repo,
+        Arc::new(DelayingWalletClient),
+    );
+
+    let auction_id = uuid::Uuid::new_v4().to_string();
+    let now = 1_700_000_000i64;
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
+            id: auction_id.clone(),
+            listing_id: "listing-proxy-concurrent".to_string(),
+            seller_id: "seller-concurrent".to_string(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 5000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 200,
+            status: "ACTIVE".to_string(),
+            start_time: now,
+            end_time: now + 300,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("insert auction");
+
+    let a_id = auction_id.clone();
+    let first = tokio::spawn(async move {
+        first_instance
+            .place_proxy_bid_and_persist(&a_id, "proxy-a", 5000, now + 1)
+            .await
+    });
+    let b_id = auction_id.clone();
+    let second = tokio::spawn(async move {
+        second_instance
+            .place_proxy_bid_and_persist(&b_id, "proxy-b", 4800, now + 2)
+            .await
+    });
+
+    first.await.expect("join first").expect("first proxy");
+    second.await.expect("join second").expect("second proxy");
+
+    let top_bid = bid_repo
+        .find_winning_bid(&auction_id)
+        .await
+        .expect("find winning bid")
+        .expect("winning bid exists");
+    assert_eq!(top_bid.bidder_id, "proxy-a");
+    assert_eq!(top_bid.bid_amount_cents, 5000);
+}

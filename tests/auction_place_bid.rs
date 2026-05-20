@@ -12,7 +12,6 @@ fn sample_auction(start_at: u64, end_at: u64) -> ListingAuctionSession {
         Money::from_cents(50_00),
         UnixSeconds::new(start_at),
         UnixSeconds::new(end_at),
-        3,
     )
 }
 
@@ -35,7 +34,7 @@ fn reject_bid_when_scheduled() {
     assert!(matches!(
         result,
         Err(BidError::AuctionNotActive {
-            status: ListingAuctionSessionStatus::Scheduled
+            status: ListingAuctionSessionStatus::Draft
         })
     ));
 }
@@ -184,7 +183,7 @@ fn extend_auction_when_bid_in_last_two_minutes() {
 }
 
 #[test]
-fn stop_extending_after_extension_cap() {
+fn unlimited_extensions_per_spec() {
     let mut auction = ListingAuctionSession::new(
         "auction-2",
         "listing-2",
@@ -194,10 +193,10 @@ fn stop_extending_after_extension_cap() {
         Money::from_cents(50_00),
         UnixSeconds::new(0),
         UnixSeconds::new(300),
-        1,
     );
     activate_auction(&mut auction, 0);
 
+    // First extension
     let first = auction
         .place_bid(
             UserId::new("user-1"),
@@ -205,21 +204,33 @@ fn stop_extending_after_extension_cap() {
             UnixSeconds::new(250),
         )
         .expect("first bid should extend");
-
     assert!(first.extended);
     assert_eq!(first.new_end_at, UnixSeconds::new(370));
 
+    // Second extension — should also extend (no limit per spec)
     let second = auction
         .place_bid(
             UserId::new("user-2"),
             Money::from_cents(12_00),
             UnixSeconds::new(360),
         )
-        .expect("second bid should be accepted without extension");
+        .expect("second bid should extend too");
+    assert!(second.extended);
+    assert_eq!(second.new_end_at, UnixSeconds::new(480));
 
-    assert!(!second.extended);
-    assert_eq!(second.new_end_at, UnixSeconds::new(370));
-    assert_eq!(auction.end_at(), UnixSeconds::new(370));
+    // Third extension — still no limit
+    let third = auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(14_00),
+            UnixSeconds::new(470),
+        )
+        .expect("third bid should extend too");
+    assert!(third.extended);
+    assert_eq!(third.new_end_at, UnixSeconds::new(590));
+
+    // Verify total extensions tracked
+    assert_eq!(auction.extensions(), 3);
 }
 
 #[test]
@@ -252,13 +263,13 @@ fn reject_bid_after_end_time() {
         UnixSeconds::new(100),
     );
 
-    assert!(matches!(result, Err(BidError::AuctionEnded { .. })));
+    assert!(matches!(result, Err(BidError::AuctionEnded { .. })), "Unexpected result: {:?}", result);
 }
 
 #[test]
-fn scheduled_status_on_creation() {
+fn draft_status_on_creation() {
     let auction = sample_auction(100, 200);
-    assert_eq!(auction.status(), ListingAuctionSessionStatus::Scheduled);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Draft);
 }
 
 #[test]
@@ -325,6 +336,7 @@ fn determine_won_when_reserve_met_after_end() {
 
     let result = auction.determine_outcome();
     assert_eq!(result, ListingAuctionSessionOutcome::Won);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Won);
 }
 
 #[test]
@@ -342,13 +354,15 @@ fn determine_unsold_when_reserve_not_met() {
 
     let result = auction.determine_outcome();
     assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Unsold);
 }
 
 #[test]
 fn determine_unsold_when_no_bids() {
-    let auction = sample_auction(0, 100);
+    let mut auction = sample_auction(0, 100);
     let result = auction.determine_outcome();
     assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Unsold);
 }
 
 #[test]

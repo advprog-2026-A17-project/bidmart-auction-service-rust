@@ -170,6 +170,12 @@ async fn test_place_bid_holds_funds_from_wallet() {
     assert_eq!(holds[0].user_id, "user-1");
     assert_eq!(holds[0].bid_id, bid.id);
     assert_eq!(holds[0].amount, 1500);
+    assert_eq!(
+        holds[0].expires_at,
+        chrono::DateTime::<chrono::Utc>::from_timestamp(now + 300, 0)
+            .expect("valid timestamp")
+            .to_rfc3339()
+    );
 }
 
 #[tokio::test]

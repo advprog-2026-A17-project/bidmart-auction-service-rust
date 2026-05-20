@@ -2,7 +2,7 @@ use sqlx::AnyPool;
 
 use crate::persistence::models::{
     ListingAuctionSessionRecord, BidRecord, NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
-    OutboxEventRecord,
+    OutboxEventRecord, ProxyBidRecord,
 };
 
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ impl ListingAuctionSessionRepository {
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings \
-             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CLOSED', 'CANCELLED') \
              ORDER BY end_time ASC",
         )
         .bind(now)
@@ -98,7 +98,7 @@ impl ListingAuctionSessionRepository {
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings \
-             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CLOSED', 'CANCELLED') \
              ORDER BY end_time ASC \
              LIMIT 1 \
              FOR UPDATE SKIP LOCKED"
@@ -106,7 +106,7 @@ impl ListingAuctionSessionRepository {
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings \
-             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CLOSED', 'CANCELLED') \
              ORDER BY end_time ASC \
              LIMIT 1"
         };
@@ -188,6 +188,58 @@ impl ListingAuctionSessionRepository {
 #[derive(Debug, Clone)]
 pub struct BidRepository {
     pool: AnyPool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProxyBidRepository {
+    pool: AnyPool,
+}
+
+impl ProxyBidRepository {
+    pub fn new(pool: AnyPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn upsert_max(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+        max_bid_amount_cents: i64,
+        now: i64,
+    ) -> Result<ProxyBidRecord, sqlx::Error> {
+        sqlx::query_as::<_, ProxyBidRecord>(
+            "INSERT INTO proxy_bids (listing_id, bidder_id, max_bid_amount_cents, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (listing_id, bidder_id) DO UPDATE \
+             SET max_bid_amount_cents = CASE \
+                   WHEN excluded.max_bid_amount_cents > proxy_bids.max_bid_amount_cents THEN excluded.max_bid_amount_cents \
+                   ELSE proxy_bids.max_bid_amount_cents \
+                 END, \
+                 updated_at = excluded.updated_at \
+             RETURNING listing_id AS auction_id, bidder_id, max_bid_amount_cents, created_at, updated_at",
+        )
+        .bind(auction_id)
+        .bind(bidder_id)
+        .bind(max_bid_amount_cents)
+        .bind(now)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn list_by_auction(
+        &self,
+        auction_id: &str,
+    ) -> Result<Vec<ProxyBidRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ProxyBidRecord>(
+            "SELECT listing_id AS auction_id, bidder_id, max_bid_amount_cents, created_at, updated_at \
+             FROM proxy_bids WHERE listing_id = $1 \
+             ORDER BY max_bid_amount_cents DESC, created_at ASC, bidder_id ASC",
+        )
+        .bind(auction_id)
+        .fetch_all(&self.pool)
+        .await
+    }
 }
 
 impl BidRepository {

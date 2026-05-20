@@ -13,6 +13,7 @@ use dotenvy::from_path;
 use std::time::Duration;
 use tokio::net::TcpListener;
 
+#[cfg(not(test))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = from_path(".env");
@@ -50,3 +51,6 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+fn main() {}

@@ -87,11 +87,13 @@ impl WalletBidPolicy {
 
 fn map_status(status: &str) -> ListingAuctionSessionStatus {
     match status {
-        "SCHEDULED" => ListingAuctionSessionStatus::Scheduled,
+        "DRAFT" | "SCHEDULED" => ListingAuctionSessionStatus::Draft,
         "ACTIVE" => ListingAuctionSessionStatus::Active,
         "EXTENDED" => ListingAuctionSessionStatus::Extended,
-        "ENDED" | "WON" | "UNSOLD" => ListingAuctionSessionStatus::Ended,
+        "CLOSED" | "ENDED" => ListingAuctionSessionStatus::Closed,
+        "WON" => ListingAuctionSessionStatus::Won,
+        "UNSOLD" => ListingAuctionSessionStatus::Unsold,
         "CANCELLED" => ListingAuctionSessionStatus::Cancelled,
-        _ => ListingAuctionSessionStatus::Scheduled,
+        _ => ListingAuctionSessionStatus::Draft,
     }
 }

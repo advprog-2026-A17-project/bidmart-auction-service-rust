@@ -29,6 +29,19 @@ CREATE INDEX IF NOT EXISTS bids_listing_id_idx ON bids(listing_id);
 CREATE INDEX IF NOT EXISTS bids_listing_bid_time_idx ON bids(listing_id, bid_time DESC);
 CREATE INDEX IF NOT EXISTS bids_listing_amount_idx ON bids(listing_id, bid_amount_cents DESC, bid_time ASC);
 
+CREATE TABLE IF NOT EXISTS proxy_bids (
+    listing_id TEXT NOT NULL,
+    bidder_id TEXT NOT NULL,
+    max_bid_amount_cents INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (listing_id, bidder_id),
+    FOREIGN KEY (listing_id) REFERENCES listings(id)
+);
+
+CREATE INDEX IF NOT EXISTS proxy_bids_listing_max_idx
+    ON proxy_bids(listing_id, max_bid_amount_cents DESC, created_at ASC, bidder_id ASC);
+
 CREATE TABLE IF NOT EXISTS outbox_events (
     id TEXT PRIMARY KEY,
     aggregate_id TEXT NOT NULL,

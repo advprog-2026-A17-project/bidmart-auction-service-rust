@@ -53,6 +53,15 @@ pub struct NewBidRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyBidRecord {
+    pub auction_id: String,
+    pub bidder_id: String,
+    pub max_bid_amount_cents: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboxEventRecord {
     pub id: String,
     pub aggregate_id: String,
@@ -159,6 +168,20 @@ impl<'r> FromRow<'r, AnyRow> for OutboxEventRecord {
             payload: row.try_get("payload")?,
             published: bool_from_row(row, "published")?,
             published_at: optional_i64(row, "published_at")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, AnyRow> for ProxyBidRecord {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            auction_id: row
+                .try_get::<String, _>("auction_id")
+                .or_else(|_| row.try_get("listing_id"))?,
+            bidder_id: row.try_get("bidder_id")?,
+            max_bid_amount_cents: row.try_get("max_bid_amount_cents")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

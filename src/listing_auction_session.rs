@@ -89,10 +89,12 @@ pub struct Bid {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListingAuctionSessionStatus {
-    Scheduled,
+    Draft,
     Active,
     Extended,
-    Ended,
+    Closed,
+    Won,
+    Unsold,
     Cancelled,
 }
 
@@ -144,7 +146,6 @@ pub struct ListingAuctionSession {
     reserve_price: Money,
     start_at: UnixSeconds,
     end_at: UnixSeconds,
-    max_extensions: u32,
     status: ListingAuctionSessionStatus,
     current_highest: Option<Bid>,
     extensions: u32,
@@ -160,7 +161,6 @@ impl ListingAuctionSession {
         reserve_price: Money,
         start_at: UnixSeconds,
         end_at: UnixSeconds,
-        max_extensions: u32,
     ) -> Self {
         Self {
             id: ListingAuctionSessionId::new(id),
@@ -171,8 +171,7 @@ impl ListingAuctionSession {
             reserve_price,
             start_at,
             end_at,
-            max_extensions,
-            status: ListingAuctionSessionStatus::Scheduled,
+            status: ListingAuctionSessionStatus::Draft,
             current_highest: None,
             extensions: 0,
         }
@@ -187,7 +186,6 @@ impl ListingAuctionSession {
         reserve_price: Money,
         start_at: UnixSeconds,
         end_at: UnixSeconds,
-        max_extensions: u32,
         status: ListingAuctionSessionStatus,
         current_highest: Option<Bid>,
     ) -> Self {
@@ -200,7 +198,6 @@ impl ListingAuctionSession {
             reserve_price,
             start_at,
             end_at,
-            max_extensions,
             status,
             current_highest,
             extensions: 0,
@@ -218,14 +215,23 @@ impl ListingAuctionSession {
             });
         }
 
-        if now >= self.end_at || self.status == ListingAuctionSessionStatus::Ended {
-            self.status = ListingAuctionSessionStatus::Ended;
+        if self.status == ListingAuctionSessionStatus::Closed
+            || self.status == ListingAuctionSessionStatus::Won
+            || self.status == ListingAuctionSessionStatus::Unsold
+        {
             return Err(ListingAuctionSessionStateError::AlreadyEnded {
                 end_at: self.end_at,
             });
         }
 
-        if self.status == ListingAuctionSessionStatus::Scheduled {
+        if now >= self.end_at {
+            self.status = ListingAuctionSessionStatus::Closed;
+            return Err(ListingAuctionSessionStateError::AlreadyEnded {
+                end_at: self.end_at,
+            });
+        }
+
+        if self.status == ListingAuctionSessionStatus::Draft {
             self.status = ListingAuctionSessionStatus::Active;
         }
 
@@ -283,7 +289,7 @@ impl ListingAuctionSession {
         }
 
         if now >= self.end_at {
-            self.status = ListingAuctionSessionStatus::Ended;
+            self.status = ListingAuctionSessionStatus::Closed;
             return Err(BidError::AuctionEnded {
                 end_at: self.end_at,
             });
@@ -348,11 +354,9 @@ impl ListingAuctionSession {
         }
     }
 
+    /// Anti-sniping: extends auction by 2 minutes if bid is within last 2 minutes.
+    /// Per spec: "tanpa batas maksimum perpanjangan" — no extension limit.
     fn maybe_extend(&mut self, now: UnixSeconds) -> bool {
-        if self.extensions >= self.max_extensions {
-            return false;
-        }
-
         let remaining = now.seconds_until(self.end_at);
         if remaining <= ANTI_SNIPING_WINDOW_SECS {
             self.end_at = now.add_secs(ANTI_SNIPING_EXTENSION_SECS);
@@ -363,10 +367,35 @@ impl ListingAuctionSession {
         false
     }
 
-    pub fn determine_outcome(&self) -> ListingAuctionSessionOutcome {
+    /// Close the auction and transition to CLOSED state.
+    /// Call determine_outcome() after to get WON/UNSOLD.
+    pub fn close(&mut self) {
+        self.status = ListingAuctionSessionStatus::Closed;
+    }
+
+    pub fn determine_outcome(&mut self) -> ListingAuctionSessionOutcome {
+        self.status = ListingAuctionSessionStatus::Closed;
         match &self.current_highest {
-            Some(bid) if bid.amount >= self.reserve_price => ListingAuctionSessionOutcome::Won,
-            _ => ListingAuctionSessionOutcome::Unsold,
+            Some(bid) if bid.amount >= self.reserve_price => {
+                self.status = ListingAuctionSessionStatus::Won;
+                ListingAuctionSessionOutcome::Won
+            }
+            _ => {
+                self.status = ListingAuctionSessionStatus::Unsold;
+                ListingAuctionSessionOutcome::Unsold
+            }
         }
+    }
+
+    pub fn extensions(&self) -> u32 {
+        self.extensions
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id.0
+    }
+
+    pub fn listing_id(&self) -> &str {
+        &self.listing_id.0
     }
 }

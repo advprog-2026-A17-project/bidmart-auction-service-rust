@@ -15,24 +15,24 @@ impl AuctionClosureScheduler {
         Self { auction_service }
     }
 
-    pub async fn close_pending(
-        &self,
-    ) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
-        let auctions = self
-            .auction_service
-            .list_pending_closure()
-            .await
-            .map_err(AuctionClosureSchedulerError::from)?;
+    pub async fn close_pending(&self) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
         let mut report = AuctionClosureReport {
-            attempted: auctions.len(),
+            attempted: 0,
             closed: 0,
             failed: 0,
         };
 
-        for auction in auctions {
-            match self.auction_service.close_auction(&auction.id).await {
-                Ok(_) => report.closed += 1,
-                Err(_) => report.failed += 1,
+        loop {
+            match self.auction_service.process_one_pending_closure().await {
+                Ok(Some(_)) => {
+                    report.attempted += 1;
+                    report.closed += 1;
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    report.attempted += 1;
+                    report.failed += 1;
+                }
             }
         }
 

@@ -88,6 +88,40 @@ impl ListingAuctionSessionRepository {
         .await
     }
 
+    pub async fn pop_pending_closure(
+        &self,
+        now: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             ORDER BY end_time ASC \
+             LIMIT 1 \
+             FOR UPDATE SKIP LOCKED",
+        )
+        .bind(now)
+        .fetch_optional(&mut **tx)
+        .await
+    }
+
+    pub async fn find_by_id_for_update(
+        &self,
+        id: &str,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings WHERE id = $1 OR listing_id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await
+    }
+
     pub async fn update_lifecycle_status(
         &self,
         auction_id: &str,
@@ -107,6 +141,29 @@ impl ListingAuctionSessionRepository {
         .bind(updated_at)
         .bind(auction_id)
         .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn update_lifecycle_status_with_tx(
+        &self,
+        auction_id: &str,
+        status: &str,
+        current_highest_bid_cents: Option<i64>,
+        updated_at: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    ) -> Result<ListingAuctionSessionRecord, sqlx::Error> {
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(
+            "UPDATE listings \
+             SET lifecycle_state = $1, current_highest_bid_cents = $2, updated_at = $3 \
+             WHERE id = $4 \
+             RETURNING id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at",
+        )
+        .bind(status)
+        .bind(current_highest_bid_cents)
+        .bind(updated_at)
+        .bind(auction_id)
+        .fetch_one(&mut **tx)
         .await
     }
 }
@@ -268,6 +325,29 @@ impl OutboxRepository {
         .bind(event.updated_at)
         .bind(event.published_at)
         .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn insert_with_tx(
+        &self,
+        event: &NewOutboxEventRecord,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    ) -> Result<OutboxEventRecord, sqlx::Error> {
+        sqlx::query_as::<_, OutboxEventRecord>(
+            "INSERT INTO outbox_events (id, aggregate_id, event_type, payload, published, created_at, updated_at, published_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             RETURNING id, aggregate_id, event_type, payload, CASE WHEN published THEN 1 ELSE 0 END AS published, \
+             published_at, created_at, updated_at",
+        )
+        .bind(&event.id)
+        .bind(&event.aggregate_id)
+        .bind(&event.event_type)
+        .bind(&event.payload)
+        .bind(event.published)
+        .bind(event.created_at)
+        .bind(event.updated_at)
+        .bind(event.published_at)
+        .fetch_one(&mut **tx)
         .await
     }
 

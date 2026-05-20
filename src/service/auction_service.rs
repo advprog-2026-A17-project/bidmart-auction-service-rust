@@ -196,42 +196,94 @@ impl AuctionService {
             .map_err(|error| ListPendingClosureError::DatabaseError(error.to_string()))
     }
 
+    /// Optimized for background queue processing using Pessimistic Lock
+    pub async fn process_one_pending_closure(
+        &self,
+    ) -> Result<Option<ListingAuctionSessionRecord>, CloseListingAuctionSessionError> {
+        let now = chrono::Utc::now().timestamp();
+        let mut tx = self
+            .listing_auction_session_repo
+            .pool
+            .begin()
+            .await
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+
+        let pending_auction = self
+            .listing_auction_session_repo
+            .pop_pending_closure(now, &mut tx)
+            .await
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+
+        let Some(auction) = pending_auction else {
+            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+            return Ok(None);
+        };
+
+        let updated = self.execute_auction_closure(auction, &mut tx, now).await?;
+        
+        tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+        
+        self.execute_post_closure_side_effects(&updated).await?;
+
+        Ok(Some(updated))
+    }
+
+    /// Manual close endpoint secured with row-level transaction
     pub async fn close_auction(
         &self,
         auction_id: &str,
     ) -> Result<ListingAuctionSessionRecord, CloseListingAuctionSessionError> {
+        let now = chrono::Utc::now().timestamp();
+        let mut tx = self
+            .listing_auction_session_repo
+            .pool
+            .begin()
+            .await
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+
         let auction = self
             .listing_auction_session_repo
-            .find_by_id(auction_id)
+            .find_by_id_for_update(auction_id, &mut tx)
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?
-            .or(
-                self.listing_auction_session_repo
-                    .find_by_listing_id(auction_id)
-                    .await
-                    .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?,
-            )
             .ok_or(CloseListingAuctionSessionError::AuctionNotFound)?;
-        let canonical_auction_id = auction.id.clone();
 
-        let now = chrono::Utc::now().timestamp();
         if auction.end_time > now {
+            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
             return Err(CloseListingAuctionSessionError::AuctionNotEnded);
         }
 
         if auction.status == "WON" || auction.status == "UNSOLD" {
+            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
             return Ok(auction);
         }
 
+        let updated = self.execute_auction_closure(auction, &mut tx, now).await?;
+        
+        tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+
+        self.execute_post_closure_side_effects(&updated).await?;
+
+        Ok(updated)
+    }
+
+    async fn execute_auction_closure(
+        &self,
+        auction: ListingAuctionSessionRecord,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        now: i64,
+    ) -> Result<ListingAuctionSessionRecord, CloseListingAuctionSessionError> {
         let bids = self
             .bid_repo
-            .list_by_auction_id_desc(&canonical_auction_id)
+            .list_by_auction_id_desc(&auction.id)
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+        
         let winning_bid = bids.first();
         let highest_bid_cents = winning_bid
             .map(|bid| bid.bid_amount_cents)
             .or(auction.current_highest_bid_cents);
+            
         let status = if highest_bid_cents
             .map(|amount| amount >= auction.reserve_price_cents)
             .unwrap_or(false)
@@ -243,12 +295,31 @@ impl AuctionService {
 
         let updated = self
             .listing_auction_session_repo
-            .update_lifecycle_status(&canonical_auction_id, status, highest_bid_cents, now)
+            .update_lifecycle_status_with_tx(&auction.id, status, highest_bid_cents, now, tx)
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
 
+        self.publish_auction_ended_event_with_tx(&updated, winning_bid, tx)
+            .await
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+
+        Ok(updated)
+    }
+
+    async fn execute_post_closure_side_effects(
+        &self,
+        auction: &ListingAuctionSessionRecord,
+    ) -> Result<(), CloseListingAuctionSessionError> {
+        let bids = self
+            .bid_repo
+            .list_by_auction_id_desc(&auction.id)
+            .await
+            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
+            
+        let winning_bid = bids.first();
+
         if let Some(wallet_client) = &self.wallet_client {
-            if status == "WON" {
+            if auction.status == "WON" {
                 if let Some(hold_id) = winning_bid.and_then(|bid| bid.wallet_hold_id.as_deref()) {
                     wallet_client
                         .convert_hold_to_payment(hold_id)
@@ -266,12 +337,7 @@ impl AuctionService {
                 }
             }
         }
-
-        self.publish_auction_ended_event(&updated, winning_bid)
-            .await
-            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
-
-        Ok(updated)
+        Ok(())
     }
 
     pub async fn list_bids(&self, auction_id: &str) -> Result<Vec<BidRecord>, ListBidsError> {
@@ -556,7 +622,6 @@ impl AuctionService {
                 .unwrap_or(updated_record),
         };
 
-        // Publish event via outbox
         self.publish_bid_placed_event(&updated_record, &inserted_bid)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
@@ -577,7 +642,6 @@ impl AuctionService {
             _ => crate::listing_auction_session::ListingAuctionSessionStatus::Scheduled,
         };
 
-        // Fetch current highest bid from database
         let current_highest = self
             .bid_repo
             .find_winning_bid(&record.id)
@@ -597,7 +661,7 @@ impl AuctionService {
             Money::from_cents(record.reserve_price_cents as u64),
             UnixSeconds::new(record.start_time as u64),
             UnixSeconds::new(record.end_time as u64),
-            3, // max_extensions - unlimited per spec but set reasonable default
+            3,
             status,
             current_highest,
         ))
@@ -641,7 +705,6 @@ impl AuctionService {
         }
     }
 
-    /// Get auction with bids
     pub async fn get_auction_with_bids(
         &self,
         auction_id: &str,
@@ -726,10 +789,11 @@ impl AuctionService {
         Ok(())
     }
 
-    async fn publish_auction_ended_event(
+    async fn publish_auction_ended_event_with_tx(
         &self,
         auction: &ListingAuctionSessionRecord,
         winning_bid: Option<&BidRecord>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     ) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({
@@ -752,7 +816,7 @@ impl AuctionService {
             created_at: now,
             updated_at: now,
         };
-        self.outbox_repo.insert(&event).await?;
+        self.outbox_repo.insert_with_tx(&event, tx).await?;
         Ok(())
     }
 

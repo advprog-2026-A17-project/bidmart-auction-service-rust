@@ -32,6 +32,7 @@ impl AuctionClosureScheduler {
                 Err(_) => {
                     report.attempted += 1;
                     report.failed += 1;
+                    break;
                 }
             }
         }
@@ -67,3 +68,4 @@ pub enum AuctionClosureSchedulerError {
     #[error("Close auction error: {0}")]
     CloseAuction(#[from] CloseListingAuctionSessionError),
 }
+

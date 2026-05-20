@@ -93,18 +93,28 @@ impl ListingAuctionSessionRepository {
         now: i64,
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, ListingAuctionSessionRecord>(
+        let use_locking = tx.backend_name() != "SQLite";
+        let query = if use_locking {
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
              FROM listings \
              WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
              ORDER BY end_time ASC \
              LIMIT 1 \
-             FOR UPDATE SKIP LOCKED",
-        )
-        .bind(now)
-        .fetch_optional(&mut **tx)
-        .await
+             FOR UPDATE SKIP LOCKED"
+        } else {
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings \
+             WHERE end_time <= $1 AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CANCELLED') \
+             ORDER BY end_time ASC \
+             LIMIT 1"
+        };
+
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(query)
+            .bind(now)
+            .fetch_optional(&mut **tx)
+            .await
     }
 
     pub async fn find_by_id_for_update(
@@ -112,14 +122,21 @@ impl ListingAuctionSessionRepository {
         id: &str,
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
-        sqlx::query_as::<_, ListingAuctionSessionRecord>(
+        let use_locking = tx.backend_name() != "SQLite";
+        let query = if use_locking {
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
-             FROM listings WHERE id = $1 OR listing_id = $1 FOR UPDATE",
-        )
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await
+             FROM listings WHERE id = $1 OR listing_id = $1 FOR UPDATE"
+        } else {
+            "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
+             current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
+             FROM listings WHERE id = $1 OR listing_id = $1"
+        };
+
+        sqlx::query_as::<_, ListingAuctionSessionRecord>(query)
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await
     }
 
     pub async fn update_lifecycle_status(
@@ -213,6 +230,21 @@ impl BidRepository {
         )
         .bind(auction_id)
         .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn list_by_auction_id_desc_with_tx(
+        &self,
+        auction_id: &str,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    ) -> Result<Vec<BidRecord>, sqlx::Error> {
+        sqlx::query_as::<_, BidRecord>(
+            "SELECT id, listing_id AS auction_id, bidder_id, bid_amount_cents, bid_time, wallet_hold_id \
+             FROM bids WHERE listing_id = $1 \
+             ORDER BY bid_amount_cents DESC, bid_time ASC, id ASC",
+        )
+        .bind(auction_id)
+        .fetch_all(&mut **tx)
         .await
     }
 

@@ -7,7 +7,56 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
-use bidmart_auction_service_rust::client::{HoldFundsRequest, HttpWalletClient, WalletClient};
+use bidmart_auction_service_rust::client::{
+    GrpcWalletClient, HoldFundsRequest, HttpWalletClient, WalletClient, WalletClientError,
+};
+
+async fn serve_wallet_response(status: StatusCode, body: serde_json::Value) -> String {
+    let app = Router::new().route(
+        "/api/v1/wallet/hold",
+        post(move |Json(_payload): Json<Value>| async move { (status, Json(body)) }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind wallet test server");
+    let address = listener.local_addr().expect("read local address");
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve wallet test server");
+    });
+
+    format!("http://{address}")
+}
+
+async fn serve_wallet_release_response(status: StatusCode) -> String {
+    let app = Router::new()
+        .route(
+            "/api/v1/wallet/release",
+            post({
+                let status = status;
+                move || async move { status }
+            }),
+        )
+        .route(
+            "/api/v1/wallet/convert",
+            post({
+                let status = status;
+                move || async move { status }
+            }),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind wallet test server");
+    let address = listener.local_addr().expect("read local address");
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve wallet test server");
+    });
+
+    format!("http://{address}")
+}
 
 #[derive(Clone)]
 struct WalletState {
@@ -103,4 +152,101 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
         tokens.as_slice(),
         &[Some("bidmart-local-internal-token".to_string())]
     );
+}
+
+#[tokio::test]
+async fn http_wallet_client_reports_insufficient_balance() {
+    let base_url = serve_wallet_response(
+        StatusCode::BAD_REQUEST,
+        json!("INSUFFICIENT_BALANCE"),
+    )
+    .await;
+    let client = HttpWalletClient::new(base_url).expect("create wallet client");
+
+    let error = client
+        .hold_funds(HoldFundsRequest {
+            user_id: "bidder-http-1".to_string(),
+            role: Some("BUYER".to_string()),
+            hold_id: "mock-hold-123".to_string(),
+            auction_id: "auction-http-1".to_string(),
+            bid_id: "bid-http-1".to_string(),
+            amount: 1550,
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, WalletClientError::InsufficientBalance(_)));
+}
+
+#[tokio::test]
+async fn http_wallet_client_returns_error_on_invalid_json() {
+    let base_url = serve_wallet_response(StatusCode::OK, json!("not-json")).await;
+    let client = HttpWalletClient::new(base_url).expect("create wallet client");
+
+    let error = client
+        .hold_funds(HoldFundsRequest {
+            user_id: "bidder-http-1".to_string(),
+            role: Some("BUYER".to_string()),
+            hold_id: "mock-hold-123".to_string(),
+            auction_id: "auction-http-1".to_string(),
+            bid_id: "bid-http-1".to_string(),
+            amount: 1550,
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, WalletClientError::ServiceError(_)));
+}
+
+#[tokio::test]
+async fn http_wallet_client_release_and_convert_failures() {
+    let base_url = serve_wallet_release_response(StatusCode::INTERNAL_SERVER_ERROR).await;
+    let client = HttpWalletClient::new(base_url).expect("create wallet client");
+
+    let release_error = client.release_hold("hold-1").await.unwrap_err();
+    assert!(matches!(release_error, WalletClientError::ServiceError(_)));
+
+    let convert_error = client.convert_hold_to_payment("hold-1").await.unwrap_err();
+    assert!(matches!(convert_error, WalletClientError::ServiceError(_)));
+}
+
+#[tokio::test]
+async fn http_wallet_client_release_and_convert_success() {
+    let base_url = serve_wallet_release_response(StatusCode::OK).await;
+    let client = HttpWalletClient::new(base_url).expect("create wallet client");
+
+    client.release_hold("hold-1").await.expect("release hold");
+    client
+        .convert_hold_to_payment("hold-1")
+        .await
+        .expect("convert hold");
+}
+
+#[test]
+fn grpc_wallet_client_rejects_empty_endpoint() {
+    let error = GrpcWalletClient::new("").unwrap_err();
+    assert!(matches!(error, WalletClientError::ServiceError(_)));
+}
+
+#[tokio::test]
+async fn grpc_wallet_client_returns_network_error_when_unavailable() {
+    let client = GrpcWalletClient::new("http://127.0.0.1:1").expect("grpc client");
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        client.hold_funds(HoldFundsRequest {
+            user_id: "bidder-1".to_string(),
+            role: Some("BUYER".to_string()),
+            hold_id: "hold-1".to_string(),
+            auction_id: "auction-1".to_string(),
+            bid_id: "bid-1".to_string(),
+            amount: 1200,
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
+        }),
+    )
+    .await
+    .expect("timeout");
+
+    assert!(matches!(result.unwrap_err(), WalletClientError::NetworkError(_)));
 }

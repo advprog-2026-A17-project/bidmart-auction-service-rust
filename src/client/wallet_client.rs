@@ -310,6 +310,7 @@ impl WalletClientError {
     }
 }
 
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 struct GrpcHoldFundsRequest {
     #[prost(string, tag = "1")]

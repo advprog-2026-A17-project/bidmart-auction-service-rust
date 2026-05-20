@@ -156,6 +156,7 @@ impl CatalogClientError {
     }
 }
 
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 struct GrpcGetListingSummaryRequest {
     #[prost(string, tag = "1")]

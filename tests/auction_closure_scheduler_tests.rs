@@ -71,3 +71,18 @@ async fn closure_scheduler_closes_expired_unprocessed_auctions() {
         .expect("auction exists");
     assert_eq!(auction.status, "UNSOLD");
 }
+
+#[tokio::test]
+async fn close_pending_returns_empty_report_when_no_auctions() {
+    let pool = setup_test_db().await;
+    let listing_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(listing_repo, bid_repo, outbox_repo);
+    let scheduler = AuctionClosureScheduler::new(service);
+
+    let report = scheduler.close_pending().await.expect("report");
+    assert_eq!(report.attempted, 0);
+    assert_eq!(report.closed, 0);
+    assert_eq!(report.failed, 0);
+}

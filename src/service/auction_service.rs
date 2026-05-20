@@ -219,11 +219,11 @@ impl AuctionService {
             return Ok(None);
         };
 
-        let updated = self.execute_auction_closure(auction, &mut tx, now).await?;
+        let (updated, bids) = self.execute_auction_closure(auction, &mut tx, now).await?;
         
         tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
         
-        self.execute_post_closure_side_effects(&updated).await?;
+        self.execute_post_closure_side_effects(&updated, &bids).await?;
 
         Ok(Some(updated))
     }
@@ -258,11 +258,11 @@ impl AuctionService {
             return Ok(auction);
         }
 
-        let updated = self.execute_auction_closure(auction, &mut tx, now).await?;
+        let (updated, bids) = self.execute_auction_closure(auction, &mut tx, now).await?;
         
         tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
 
-        self.execute_post_closure_side_effects(&updated).await?;
+        self.execute_post_closure_side_effects(&updated, &bids).await?;
 
         Ok(updated)
     }
@@ -272,10 +272,10 @@ impl AuctionService {
         auction: ListingAuctionSessionRecord,
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         now: i64,
-    ) -> Result<ListingAuctionSessionRecord, CloseListingAuctionSessionError> {
+    ) -> Result<(ListingAuctionSessionRecord, Vec<BidRecord>), CloseListingAuctionSessionError> {
         let bids = self
             .bid_repo
-            .list_by_auction_id_desc(&auction.id)
+            .list_by_auction_id_desc_with_tx(&auction.id, tx)
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
         
@@ -303,19 +303,14 @@ impl AuctionService {
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
 
-        Ok(updated)
+        Ok((updated, bids))
     }
 
     async fn execute_post_closure_side_effects(
         &self,
         auction: &ListingAuctionSessionRecord,
+        bids: &[BidRecord],
     ) -> Result<(), CloseListingAuctionSessionError> {
-        let bids = self
-            .bid_repo
-            .list_by_auction_id_desc(&auction.id)
-            .await
-            .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
-            
         let winning_bid = bids.first();
 
         if let Some(wallet_client) = &self.wallet_client {
@@ -327,7 +322,7 @@ impl AuctionService {
                         .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                 }
             } else {
-                for bid in &bids {
+                for bid in bids {
                     if let Some(hold_id) = &bid.wallet_hold_id {
                         wallet_client
                             .release_hold(hold_id)

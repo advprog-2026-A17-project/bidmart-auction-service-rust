@@ -94,9 +94,9 @@ fn http_wallet_client_invalid_url() {
 }
 
 #[test]
-fn http_wallet_client_https_rejected() {
+fn http_wallet_client_https_accepted() {
     let result = HttpWalletClient::new("https://localhost:8080");
-    assert!(result.is_err());
+    assert!(result.is_ok());
 }
 
 #[test]

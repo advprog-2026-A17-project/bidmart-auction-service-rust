@@ -36,6 +36,11 @@ impl HttpServiceClient {
         }
 
         let https_client = if scheme == "https" {
+            static TLS_PROVIDER: std::sync::Once = std::sync::Once::new();
+            TLS_PROVIDER.call_once(|| {
+                let _ = rustls::crypto::ring::default_provider().install_default();
+            });
+
             let https = HttpsConnectorBuilder::new()
                 .with_native_roots()
                 .expect("TLS native root certificates should be available")

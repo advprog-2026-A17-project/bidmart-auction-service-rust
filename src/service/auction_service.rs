@@ -331,11 +331,11 @@ impl AuctionService {
                         .await
                         .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                 }
-                let amount_cents = winner.bid_amount_cents as u64;
+                let amount = cents_to_rupiah(winner.bid_amount_cents);
                 wallet_client
                     .credit_seller_escrow(
                         &auction.seller_id,
-                        amount_cents,
+                        amount,
                         &auction.id,
                     )
                     .await
@@ -577,7 +577,7 @@ impl AuctionService {
                 hold_id: uuid::Uuid::new_v4().to_string(),
                 auction_id: canonical_auction_id.clone(),
                 bid_id: bid_id.clone(),
-                amount: accepted_bid_amount_cents as u64,
+                amount: cents_to_rupiah(accepted_bid_amount_cents),
                 expires_at: hold_expiration_rfc3339(bid_result.new_end_at.value() as i64),
             };
 
@@ -757,7 +757,7 @@ impl AuctionService {
                 hold_id: uuid::Uuid::new_v4().to_string(),
                 auction_id: auction_id.to_string(),
                 bid_id: bid_id.clone(),
-                amount: target_amount as u64,
+                amount: cents_to_rupiah(target_amount),
                 expires_at: hold_expiration_rfc3339(updated_end_time),
             };
             let hold_response = wallet_client
@@ -1226,6 +1226,13 @@ fn bid_cursor_from_bid(bid: &BidRecord) -> BidCursor {
         bid_time: bid.bid_time,
         id: bid.id.clone(),
     }
+}
+
+fn cents_to_rupiah(amount_cents: i64) -> u64 {
+    if amount_cents <= 0 {
+        return 0;
+    }
+    ((amount_cents as u64) + 99) / 100
 }
 
 impl std::fmt::Display for BidCursor {

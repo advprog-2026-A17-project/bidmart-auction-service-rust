@@ -46,7 +46,7 @@ pub struct ConvertFundsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SellerEscrowRequest {
     pub seller_id: String,
-    pub amount_cents: u64,
+    pub amount: u64,
     pub correlation_id: Option<String>,
 }
 
@@ -71,7 +71,7 @@ pub trait WalletClient: Send + Sync {
     async fn credit_seller_escrow(
         &self,
         seller_id: &str,
-        amount_cents: u64,
+        amount: u64,
         correlation_id: &str,
     ) -> Result<(), WalletClientError>;
 }
@@ -170,12 +170,12 @@ impl WalletClient for HttpWalletClient {
     async fn credit_seller_escrow(
         &self,
         seller_id: &str,
-        amount_cents: u64,
+        amount: u64,
         correlation_id: &str,
     ) -> Result<(), WalletClientError> {
         let request = SellerEscrowRequest {
             seller_id: seller_id.to_string(),
-            amount_cents,
+            amount,
             correlation_id: Some(correlation_id.to_string()),
         };
         let body = serde_json::to_vec(&request)
@@ -334,9 +334,9 @@ impl WalletClient for GrpcWalletClient {
 
     async fn credit_seller_escrow(
         &self,
-        seller_id: &str,
-        amount_cents: u64,
-        correlation_id: &str,
+        _seller_id: &str,
+        _amount: u64,
+        _correlation_id: &str,
     ) -> Result<(), WalletClientError> {
         // Post-close seller escrow requires HTTP; compose should set WALLET_SERVICE_URL
         // and wallet_client_from_endpoints prefers HTTP when both URLs are present.

@@ -556,6 +556,20 @@ impl AuctionService {
 
         let bid_id = uuid::Uuid::new_v4().to_string();
 
+        if let Some(previous_bid) = previous_winning_bid.as_ref() {
+            if previous_bid.bidder_id != bidder_id {
+                if let (Some(wallet_client), Some(previous_hold_id)) = (
+                    &self.wallet_client,
+                    previous_bid.wallet_hold_id.as_deref(),
+                ) {
+                    wallet_client
+                        .release_hold(previous_hold_id)
+                        .await
+                        .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+                }
+            }
+        }
+
         let hold_id = if let Some(wallet_client) = &self.wallet_client {
             let hold_request = HoldFundsRequest {
                 user_id: bidder_id.to_string(),
@@ -602,15 +616,6 @@ impl AuctionService {
 
         if let Some(previous_bid) = previous_winning_bid.as_ref() {
             if previous_bid.bidder_id != bidder_id {
-                if let (Some(wallet_client), Some(previous_hold_id)) = (
-                    &self.wallet_client,
-                    previous_bid.wallet_hold_id.as_deref(),
-                ) {
-                    wallet_client
-                        .release_hold(previous_hold_id)
-                        .await
-                        .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
-                }
                 self.publish_outbid_event(
                     &auction_record,
                     previous_bid,

@@ -8,6 +8,7 @@ fn api_docs_describe_rust_auction_service_as_http_connected() {
     assert!(router.contains("/api/v1/listings/:listing_id/close"));
     assert!(router.contains("/api/v1/listings/:listing_id/bids"));
     assert!(router.contains("/api/v1/listings/:listing_id/bids/cursor"));
+    assert!(router.contains("/api/v1/listings/:listing_id/proxy-bids/:bidder_id"));
 }
 
 #[test]

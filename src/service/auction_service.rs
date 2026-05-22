@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::listing_auction_session::{ListingAuctionSession, BidError, Money, UnixSeconds, UserId};
 use crate::client::{CatalogClient, HoldFundsRequest, ListingSummary, WalletClient};
+use crate::listing_auction_session::{BidError, ListingAuctionSession, Money, UnixSeconds, UserId};
 use crate::persistence::models::{
-    ListingAuctionSessionRecord, BidRecord, NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
+    BidRecord, ListingAuctionSessionRecord, NewBidRecord, NewListingAuctionSessionRecord,
+    NewOutboxEventRecord, ProxyBidRecord,
 };
-use crate::persistence::repositories::{ListingAuctionSessionRepository, BidRepository, OutboxRepository, ProxyBidRepository};
+use crate::persistence::repositories::{
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository, ProxyBidRepository,
+};
 use crate::service::auction_strategy::{AuctionType, resolve_strategy};
 use crate::service::bid_policies::{
     AmountBidPolicy, IdentityBidPolicy, TimeBidPolicy, WalletBidPolicy,
@@ -30,7 +33,10 @@ pub struct AuctionService {
 impl std::fmt::Debug for AuctionService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuctionService")
-            .field("listing_auction_session_repo", &"<ListingAuctionSessionRepository>")
+            .field(
+                "listing_auction_session_repo",
+                &"<ListingAuctionSessionRepository>",
+            )
             .field("bid_repo", &"<BidRepository>")
             .field("outbox_repo", &"<OutboxRepository>")
             .field("proxy_bid_repo", &"<ProxyBidRepository>")
@@ -47,7 +53,13 @@ impl AuctionService {
         bid_repo: BidRepository,
         outbox_repo: OutboxRepository,
     ) -> Self {
-        Self::new_with_clients(listing_auction_session_repo, bid_repo, outbox_repo, None, None)
+        Self::new_with_clients(
+            listing_auction_session_repo,
+            bid_repo,
+            outbox_repo,
+            None,
+            None,
+        )
     }
 
     pub fn new_with_wallet(
@@ -181,7 +193,9 @@ impl AuctionService {
             .map_err(|error| GetListingAuctionSessionError::DatabaseError(error.to_string()))
     }
 
-    pub async fn list_auctions(&self) -> Result<Vec<ListingAuctionSessionRecord>, ListListingAuctionSessionsError> {
+    pub async fn list_auctions(
+        &self,
+    ) -> Result<Vec<ListingAuctionSessionRecord>, ListListingAuctionSessionsError> {
         self.listing_auction_session_repo
             .list_all()
             .await
@@ -217,15 +231,20 @@ impl AuctionService {
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
 
         let Some(auction) = pending_auction else {
-            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+            tx.rollback()
+                .await
+                .map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
             return Ok(None);
         };
 
         let (updated, bids) = self.execute_auction_closure(auction, &mut tx, now).await?;
-        
-        tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
-        
-        self.execute_post_closure_side_effects(&updated, &bids).await?;
+
+        tx.commit()
+            .await
+            .map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+
+        self.execute_post_closure_side_effects(&updated, &bids)
+            .await?;
 
         Ok(Some(updated))
     }
@@ -251,20 +270,27 @@ impl AuctionService {
             .ok_or(CloseListingAuctionSessionError::AuctionNotFound)?;
 
         if auction.end_time > now {
-            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+            tx.rollback()
+                .await
+                .map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
             return Err(CloseListingAuctionSessionError::AuctionNotEnded);
         }
 
         if auction.status == "WON" || auction.status == "UNSOLD" {
-            tx.rollback().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+            tx.rollback()
+                .await
+                .map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
             return Ok(auction);
         }
 
         let (updated, bids) = self.execute_auction_closure(auction, &mut tx, now).await?;
-        
-        tx.commit().await.map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
 
-        self.execute_post_closure_side_effects(&updated, &bids).await?;
+        tx.commit()
+            .await
+            .map_err(|e| CloseListingAuctionSessionError::DatabaseError(e.to_string()))?;
+
+        self.execute_post_closure_side_effects(&updated, &bids)
+            .await?;
 
         Ok(updated)
     }
@@ -274,18 +300,19 @@ impl AuctionService {
         auction: ListingAuctionSessionRecord,
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         now: i64,
-    ) -> Result<(ListingAuctionSessionRecord, Vec<BidRecord>), CloseListingAuctionSessionError> {
+    ) -> Result<(ListingAuctionSessionRecord, Vec<BidRecord>), CloseListingAuctionSessionError>
+    {
         let bids = self
             .bid_repo
             .list_by_auction_id_desc_with_tx(&auction.id, tx)
             .await
             .map_err(|error| CloseListingAuctionSessionError::DatabaseError(error.to_string()))?;
-        
+
         let winning_bid = bids.first();
         let highest_bid_cents = winning_bid
             .map(|bid| bid.bid_amount_cents)
             .or(auction.current_highest_bid_cents);
-            
+
         let status = if highest_bid_cents
             .map(|amount| amount >= auction.reserve_price_cents)
             .unwrap_or(false)
@@ -326,15 +353,16 @@ impl AuctionService {
                     wallet_client
                         .convert_hold_to_payment(hold_id)
                         .await
-                        .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
+                        .map_err(|error| {
+                            CloseListingAuctionSessionError::WalletError(error.to_string())
+                        })?;
                 }
             } else {
                 for bid in bids {
                     if let Some(hold_id) = &bid.wallet_hold_id {
-                        wallet_client
-                            .release_hold(hold_id)
-                            .await
-                            .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
+                        wallet_client.release_hold(hold_id).await.map_err(|error| {
+                            CloseListingAuctionSessionError::WalletError(error.to_string())
+                        })?;
                     }
                 }
             }
@@ -348,18 +376,66 @@ impl AuctionService {
             .find_by_id(auction_id)
             .await
             .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
-            .or(
-                self.listing_auction_session_repo
-                    .find_by_listing_id(auction_id)
-                    .await
-                    .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?,
-            )
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await
+                .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?)
             .map(|record| record.id)
             .unwrap_or_else(|| auction_id.to_string());
         self.bid_repo
             .list_by_auction_id_desc(&canonical_auction_id)
             .await
             .map_err(|error| ListBidsError::DatabaseError(error.to_string()))
+    }
+
+    pub async fn get_proxy_bid(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+    ) -> Result<Option<ProxyBidRecord>, ListBidsError> {
+        let canonical_auction_id = self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await
+                .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?)
+            .map(|record| record.id)
+            .unwrap_or_else(|| auction_id.to_string());
+
+        self.proxy_bid_repo
+            .find_by_bidder(&canonical_auction_id, bidder_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))
+    }
+
+    pub async fn delete_proxy_bid(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+    ) -> Result<(), ListBidsError> {
+        let canonical_auction_id = self
+            .listing_auction_session_repo
+            .find_by_id(auction_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await
+                .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?)
+            .map(|record| record.id)
+            .unwrap_or_else(|| auction_id.to_string());
+
+        self.proxy_bid_repo
+            .delete_for_bidder(&canonical_auction_id, bidder_id)
+            .await
+            .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?;
+        Ok(())
     }
 
     pub async fn list_bids_with_cursor(
@@ -373,12 +449,11 @@ impl AuctionService {
             .find_by_id(auction_id)
             .await
             .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?
-            .or(
-                self.listing_auction_session_repo
-                    .find_by_listing_id(auction_id)
-                    .await
-                    .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?,
-            )
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await
+                .map_err(|error| ListBidsError::DatabaseError(error.to_string()))?)
             .map(|record| record.id)
             .unwrap_or_else(|| auction_id.to_string());
         let sanitized_limit = limit.unwrap_or(20).clamp(1, 100);
@@ -463,12 +538,11 @@ impl AuctionService {
             .find_by_id(auction_id)
             .await
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?
-            .or(
-                self.listing_auction_session_repo
-                    .find_by_listing_id(auction_id)
-                    .await
-                    .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?,
-            )
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await
+                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?)
             .ok_or(PlaceBidError::AuctionNotFound)?;
         let canonical_auction_id = resolved_record.id.clone();
         let _bid_guard = self.auction_bid_guard(&canonical_auction_id).await;
@@ -500,6 +574,32 @@ impl AuctionService {
             .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
 
         TimeBidPolicy::validate(&auction_record, bid_time).map_err(PlaceBidError::BidError)?;
+        if let BidPlacementMode::Proxy { max_amount_cents } = mode {
+            if let Some(current_winning_bid) = previous_winning_bid.as_ref() {
+                if current_winning_bid.bidder_id == bidder_id {
+                    if bidder_id == auction_record.seller_id {
+                        return Err(PlaceBidError::BidError(BidError::SelfBiddingNotAllowed {
+                            bidder_id: UserId::new(bidder_id),
+                        }));
+                    }
+
+                    if max_amount_cents < current_winning_bid.bid_amount_cents {
+                        return Err(PlaceBidError::BidError(BidError::BidTooLow {
+                            minimum: Money::from_cents(current_winning_bid.bid_amount_cents as u64),
+                        }));
+                    }
+
+                    WalletBidPolicy::validate(max_amount_cents).map_err(PlaceBidError::BidError)?;
+                    self.proxy_bid_repo
+                        .upsert_max(&canonical_auction_id, bidder_id, max_amount_cents, bid_time)
+                        .await
+                        .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+
+                    return Ok(current_winning_bid.clone());
+                }
+            }
+        }
+
         IdentityBidPolicy::validate(&auction_record, bidder_id, previous_winning_bid.as_ref())
             .map_err(PlaceBidError::BidError)?;
 
@@ -546,10 +646,9 @@ impl AuctionService {
 
         if let Some(previous_bid) = previous_winning_bid.as_ref() {
             if previous_bid.bidder_id != bidder_id {
-                if let (Some(wallet_client), Some(previous_hold_id)) = (
-                    &self.wallet_client,
-                    previous_bid.wallet_hold_id.as_deref(),
-                ) {
+                if let (Some(wallet_client), Some(previous_hold_id)) =
+                    (&self.wallet_client, previous_bid.wallet_hold_id.as_deref())
+                {
                     wallet_client
                         .release_hold(previous_hold_id)
                         .await
@@ -604,13 +703,9 @@ impl AuctionService {
 
         if let Some(previous_bid) = previous_winning_bid.as_ref() {
             if previous_bid.bidder_id != bidder_id {
-                self.publish_outbid_event(
-                    &auction_record,
-                    previous_bid,
-                    accepted_bid_amount_cents,
-                )
-                .await
-                .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
+                self.publish_outbid_event(&auction_record, previous_bid, accepted_bid_amount_cents)
+                    .await
+                    .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
             }
         }
 
@@ -648,12 +743,12 @@ impl AuctionService {
         };
 
         self.resolve_proxy_auto_bid(
-                &canonical_auction_id,
-                &updated_record,
-                bid_time,
-                previous_winning_bid.as_ref(),
-            )
-            .await?;
+            &canonical_auction_id,
+            &updated_record,
+            bid_time,
+            previous_winning_bid.as_ref(),
+        )
+        .await?;
 
         self.publish_bid_placed_event(&updated_record, &inserted_bid)
             .await
@@ -708,7 +803,8 @@ impl AuctionService {
         }
 
         let auto_bid_time = bid_time.saturating_add(1);
-        let (updated_status, updated_end_time) = if top_proxy.bidder_id == current_winning.bidder_id {
+        let (updated_status, updated_end_time) = if top_proxy.bidder_id == current_winning.bidder_id
+        {
             let mut end_time = current_listing.end_time;
             if end_time.saturating_sub(auto_bid_time) <= 120 {
                 end_time = auto_bid_time.saturating_add(120);
@@ -780,9 +876,10 @@ impl AuctionService {
             }
         };
 
-        if let (Some(wallet_client), Some(previous_hold_id)) =
-            (&self.wallet_client, current_winning.wallet_hold_id.as_deref())
-        {
+        if let (Some(wallet_client), Some(previous_hold_id)) = (
+            &self.wallet_client,
+            current_winning.wallet_hold_id.as_deref(),
+        ) {
             wallet_client
                 .release_hold(previous_hold_id)
                 .await
@@ -824,10 +921,14 @@ impl AuctionService {
         record: &ListingAuctionSessionRecord,
     ) -> Result<ListingAuctionSession, sqlx::Error> {
         let status = match record.status.as_str() {
-            "DRAFT" | "SCHEDULED" => crate::listing_auction_session::ListingAuctionSessionStatus::Draft,
+            "DRAFT" | "SCHEDULED" => {
+                crate::listing_auction_session::ListingAuctionSessionStatus::Draft
+            }
             "ACTIVE" => crate::listing_auction_session::ListingAuctionSessionStatus::Active,
             "EXTENDED" => crate::listing_auction_session::ListingAuctionSessionStatus::Extended,
-            "CLOSED" | "ENDED" => crate::listing_auction_session::ListingAuctionSessionStatus::Closed,
+            "CLOSED" | "ENDED" => {
+                crate::listing_auction_session::ListingAuctionSessionStatus::Closed
+            }
             "WON" => crate::listing_auction_session::ListingAuctionSessionStatus::Won,
             "UNSOLD" => crate::listing_auction_session::ListingAuctionSessionStatus::Unsold,
             "CANCELLED" => crate::listing_auction_session::ListingAuctionSessionStatus::Cancelled,
@@ -866,13 +967,11 @@ impl AuctionService {
         Ok(())
     }
 
-    async fn require_active_listing(
-        &self,
-        listing_id: &str,
-    ) -> Result<ListingSummary, String> {
-        let catalog_client = self.catalog_client.as_ref().ok_or_else(|| {
-            "Catalogue service is not configured".to_string()
-        })?;
+    async fn require_active_listing(&self, listing_id: &str) -> Result<ListingSummary, String> {
+        let catalog_client = self
+            .catalog_client
+            .as_ref()
+            .ok_or_else(|| "Catalogue service is not configured".to_string())?;
 
         let listing = catalog_client
             .get_listing_summary(listing_id)
@@ -886,15 +985,30 @@ impl AuctionService {
         Ok(listing)
     }
 
-    fn status_to_string(&self, status: crate::listing_auction_session::ListingAuctionSessionStatus) -> String {
+    fn status_to_string(
+        &self,
+        status: crate::listing_auction_session::ListingAuctionSessionStatus,
+    ) -> String {
         match status {
-            crate::listing_auction_session::ListingAuctionSessionStatus::Draft => "DRAFT".to_string(),
-            crate::listing_auction_session::ListingAuctionSessionStatus::Active => "ACTIVE".to_string(),
-            crate::listing_auction_session::ListingAuctionSessionStatus::Extended => "EXTENDED".to_string(),
-            crate::listing_auction_session::ListingAuctionSessionStatus::Closed => "CLOSED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Draft => {
+                "DRAFT".to_string()
+            }
+            crate::listing_auction_session::ListingAuctionSessionStatus::Active => {
+                "ACTIVE".to_string()
+            }
+            crate::listing_auction_session::ListingAuctionSessionStatus::Extended => {
+                "EXTENDED".to_string()
+            }
+            crate::listing_auction_session::ListingAuctionSessionStatus::Closed => {
+                "CLOSED".to_string()
+            }
             crate::listing_auction_session::ListingAuctionSessionStatus::Won => "WON".to_string(),
-            crate::listing_auction_session::ListingAuctionSessionStatus::Unsold => "UNSOLD".to_string(),
-            crate::listing_auction_session::ListingAuctionSessionStatus::Cancelled => "CANCELLED".to_string(),
+            crate::listing_auction_session::ListingAuctionSessionStatus::Unsold => {
+                "UNSOLD".to_string()
+            }
+            crate::listing_auction_session::ListingAuctionSessionStatus::Cancelled => {
+                "CANCELLED".to_string()
+            }
         }
     }
 
@@ -906,7 +1020,10 @@ impl AuctionService {
             .listing_auction_session_repo
             .find_by_id(auction_id)
             .await?
-            .or(self.listing_auction_session_repo.find_by_listing_id(auction_id).await?)
+            .or(self
+                .listing_auction_session_repo
+                .find_by_listing_id(auction_id)
+                .await?)
         {
             Some(auction) => {
                 let bids = self.bid_repo.list_by_auction_id_desc(&auction.id).await?;
@@ -1318,42 +1435,167 @@ mod tests {
         }
     }
 
-    #[test] fn validate_ok() { assert!(valid_command().validate(100).is_ok()); }
-    #[test] fn validate_empty_listing() { let mut c = valid_command(); c.listing_id = "  ".into(); assert!(c.validate(100).is_err()); }
-    #[test] fn validate_empty_seller() { let mut c = valid_command(); c.seller_id = "".into(); assert!(c.validate(100).is_err()); }
-    #[test] fn validate_empty_type() { let mut c = valid_command(); c.auction_type = " ".into(); assert!(c.validate(100).is_err()); }
-    #[test] fn validate_zero_price() { let mut c = valid_command(); c.starting_price_cents = 0; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_neg_price() { let mut c = valid_command(); c.starting_price_cents = -5; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_zero_incr() { let mut c = valid_command(); c.minimum_increment_cents = 0; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_reserve_below() { let mut c = valid_command(); c.reserve_price_cents = 500; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_reserve_eq() { let mut c = valid_command(); c.reserve_price_cents = 1000; assert!(c.validate(100).is_ok()); }
-    #[test] fn validate_end_before() { let mut c = valid_command(); c.end_time = 50; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_end_eq() { let mut c = valid_command(); c.end_time = 100; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_start_in_past() { let mut c = valid_command(); c.start_time = 100 - CREATE_AUCTION_START_TIME_CLOCK_SKEW_SECONDS - 1; assert!(c.validate(100).is_err()); }
-    #[test] fn validate_start_allows_publish_clock_skew() { let mut c = valid_command(); c.start_time = 99; assert!(c.validate(100).is_ok()); }
-    #[test] fn validate_end_not_future() { let mut c = valid_command(); c.start_time = 100; c.end_time = 100; assert!(c.validate(100).is_err()); }
+    #[test]
+    fn validate_ok() {
+        assert!(valid_command().validate(100).is_ok());
+    }
+    #[test]
+    fn validate_empty_listing() {
+        let mut c = valid_command();
+        c.listing_id = "  ".into();
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_empty_seller() {
+        let mut c = valid_command();
+        c.seller_id = "".into();
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_empty_type() {
+        let mut c = valid_command();
+        c.auction_type = " ".into();
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_zero_price() {
+        let mut c = valid_command();
+        c.starting_price_cents = 0;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_neg_price() {
+        let mut c = valid_command();
+        c.starting_price_cents = -5;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_zero_incr() {
+        let mut c = valid_command();
+        c.minimum_increment_cents = 0;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_reserve_below() {
+        let mut c = valid_command();
+        c.reserve_price_cents = 500;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_reserve_eq() {
+        let mut c = valid_command();
+        c.reserve_price_cents = 1000;
+        assert!(c.validate(100).is_ok());
+    }
+    #[test]
+    fn validate_end_before() {
+        let mut c = valid_command();
+        c.end_time = 50;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_end_eq() {
+        let mut c = valid_command();
+        c.end_time = 100;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_start_in_past() {
+        let mut c = valid_command();
+        c.start_time = 100 - CREATE_AUCTION_START_TIME_CLOCK_SKEW_SECONDS - 1;
+        assert!(c.validate(100).is_err());
+    }
+    #[test]
+    fn validate_start_allows_publish_clock_skew() {
+        let mut c = valid_command();
+        c.start_time = 99;
+        assert!(c.validate(100).is_ok());
+    }
+    #[test]
+    fn validate_end_not_future() {
+        let mut c = valid_command();
+        c.start_time = 100;
+        c.end_time = 100;
+        assert!(c.validate(100).is_err());
+    }
 
-    #[test] fn status_draft() { assert_eq!(initial_status(200, 100), "DRAFT"); }
-    #[test] fn status_active() { assert_eq!(initial_status(100, 200), "ACTIVE"); }
-    #[test] fn status_active_eq() { assert_eq!(initial_status(100, 100), "ACTIVE"); }
+    #[test]
+    fn status_draft() {
+        assert_eq!(initial_status(200, 100), "DRAFT");
+    }
+    #[test]
+    fn status_active() {
+        assert_eq!(initial_status(100, 200), "ACTIVE");
+    }
+    #[test]
+    fn status_active_eq() {
+        assert_eq!(initial_status(100, 100), "ACTIVE");
+    }
 
-    #[test] fn biddable_active() { assert!(is_catalog_listing_biddable("ACTIVE")); }
-    #[test] fn biddable_ext() { assert!(is_catalog_listing_biddable("EXTENDED")); }
-    #[test] fn biddable_ci() { assert!(is_catalog_listing_biddable("active")); assert!(is_catalog_listing_biddable("Extended")); }
-    #[test] fn not_biddable_draft() { assert!(!is_catalog_listing_biddable("DRAFT")); }
-    #[test] fn not_biddable_closed() { assert!(!is_catalog_listing_biddable("CLOSED")); }
-    #[test] fn not_biddable_empty() { assert!(!is_catalog_listing_biddable("")); }
+    #[test]
+    fn biddable_active() {
+        assert!(is_catalog_listing_biddable("ACTIVE"));
+    }
+    #[test]
+    fn biddable_ext() {
+        assert!(is_catalog_listing_biddable("EXTENDED"));
+    }
+    #[test]
+    fn biddable_ci() {
+        assert!(is_catalog_listing_biddable("active"));
+        assert!(is_catalog_listing_biddable("Extended"));
+    }
+    #[test]
+    fn not_biddable_draft() {
+        assert!(!is_catalog_listing_biddable("DRAFT"));
+    }
+    #[test]
+    fn not_biddable_closed() {
+        assert!(!is_catalog_listing_biddable("CLOSED"));
+    }
+    #[test]
+    fn not_biddable_empty() {
+        assert!(!is_catalog_listing_biddable(""));
+    }
 
-    #[test] fn cursor_ok() { let c = parse_bid_cursor("5000:170:bid-a").unwrap(); assert_eq!(c.amount_cents, 5000); assert_eq!(c.id, "bid-a"); }
-    #[test] fn cursor_bad_amt() { assert!(parse_bid_cursor("x:1:b").is_err()); }
-    #[test] fn cursor_bad_time() { assert!(parse_bid_cursor("1:x:b").is_err()); }
-    #[test] fn cursor_missing_id() { assert!(parse_bid_cursor("1:2").is_err()); }
-    #[test] fn cursor_empty_id() { assert!(parse_bid_cursor("1:2: ").is_err()); }
-    #[test] fn cursor_colons_in_id() { let c = parse_bid_cursor("1:2:a:b:c").unwrap(); assert_eq!(c.id, "a:b:c"); }
+    #[test]
+    fn cursor_ok() {
+        let c = parse_bid_cursor("5000:170:bid-a").unwrap();
+        assert_eq!(c.amount_cents, 5000);
+        assert_eq!(c.id, "bid-a");
+    }
+    #[test]
+    fn cursor_bad_amt() {
+        assert!(parse_bid_cursor("x:1:b").is_err());
+    }
+    #[test]
+    fn cursor_bad_time() {
+        assert!(parse_bid_cursor("1:x:b").is_err());
+    }
+    #[test]
+    fn cursor_missing_id() {
+        assert!(parse_bid_cursor("1:2").is_err());
+    }
+    #[test]
+    fn cursor_empty_id() {
+        assert!(parse_bid_cursor("1:2: ").is_err());
+    }
+    #[test]
+    fn cursor_colons_in_id() {
+        let c = parse_bid_cursor("1:2:a:b:c").unwrap();
+        assert_eq!(c.id, "a:b:c");
+    }
 
     #[test]
     fn cursor_roundtrip() {
-        let bid = BidRecord { id: "b1".into(), auction_id: "a1".into(), bidder_id: "u1".into(), bid_amount_cents: 5000, bid_time: 170, wallet_hold_id: None };
+        let bid = BidRecord {
+            id: "b1".into(),
+            auction_id: "a1".into(),
+            bidder_id: "u1".into(),
+            bid_amount_cents: 5000,
+            bid_time: 170,
+            wallet_hold_id: None,
+        };
         let d = bid_cursor_from_bid(&bid).to_string();
         assert_eq!(d, "5000:170:b1");
         let p = parse_bid_cursor(&d).unwrap();
@@ -1366,23 +1608,68 @@ mod tests {
         assert!(format!("{}", PlaceBidError::CatalogError("f".into())).contains("Catalog"));
         assert!(format!("{}", PlaceBidError::WalletError("f".into())).contains("Wallet"));
         assert!(format!("{}", PlaceBidError::DatabaseError("f".into())).contains("Database"));
-        assert!(!format!("{}", PlaceBidError::BidError(BidError::BidTooLow { minimum: Money::from_cents(1) })).is_empty());
-        assert_eq!(format!("{}", CreateAuctionError::InvalidInput("x".into())), "x");
+        assert!(
+            !format!(
+                "{}",
+                PlaceBidError::BidError(BidError::BidTooLow {
+                    minimum: Money::from_cents(1)
+                })
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            format!("{}", CreateAuctionError::InvalidInput("x".into())),
+            "x"
+        );
         assert!(format!("{}", CreateAuctionError::DatabaseError("x".into())).contains("Database"));
-        assert!(format!("{}", CloseListingAuctionSessionError::AuctionNotFound).contains("not found"));
-        assert!(format!("{}", CloseListingAuctionSessionError::AuctionNotEnded).contains("end time"));
-        assert!(format!("{}", CloseListingAuctionSessionError::WalletError("x".into())).contains("Wallet"));
-        assert!(format!("{}", CloseListingAuctionSessionError::DatabaseError("x".into())).contains("Database"));
+        assert!(
+            format!("{}", CloseListingAuctionSessionError::AuctionNotFound).contains("not found")
+        );
+        assert!(
+            format!("{}", CloseListingAuctionSessionError::AuctionNotEnded).contains("end time")
+        );
+        assert!(
+            format!(
+                "{}",
+                CloseListingAuctionSessionError::WalletError("x".into())
+            )
+            .contains("Wallet")
+        );
+        assert!(
+            format!(
+                "{}",
+                CloseListingAuctionSessionError::DatabaseError("x".into())
+            )
+            .contains("Database")
+        );
         assert_eq!(format!("{}", ListBidsError::InvalidInput("x".into())), "x");
         assert!(format!("{}", ListBidsError::DatabaseError("x".into())).contains("Database"));
-        assert!(format!("{}", GetListingAuctionSessionError::DatabaseError("x".into())).contains("Database"));
-        assert!(format!("{}", ListListingAuctionSessionsError::DatabaseError("x".into())).contains("Database"));
-        assert!(format!("{}", ListPendingClosureError::DatabaseError("x".into())).contains("Database"));
+        assert!(
+            format!(
+                "{}",
+                GetListingAuctionSessionError::DatabaseError("x".into())
+            )
+            .contains("Database")
+        );
+        assert!(
+            format!(
+                "{}",
+                ListListingAuctionSessionsError::DatabaseError("x".into())
+            )
+            .contains("Database")
+        );
+        assert!(
+            format!("{}", ListPendingClosureError::DatabaseError("x".into())).contains("Database")
+        );
     }
 
     #[test]
     fn bid_cursor_page_fields() {
-        let p = BidCursorPage { items: vec![], next_cursor: None, size: 20 };
+        let p = BidCursorPage {
+            items: vec![],
+            next_cursor: None,
+            size: 20,
+        };
         assert_eq!(p.items.len(), 0);
         assert!(p.next_cursor.is_none());
     }

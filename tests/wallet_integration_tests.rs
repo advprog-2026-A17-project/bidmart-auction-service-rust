@@ -3,7 +3,7 @@ use bidmart_auction_service_rust::client::{
 };
 use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 use sqlx::AnyPool;
@@ -190,7 +190,10 @@ async fn test_place_bid_holds_funds_from_wallet() {
         created_at: now,
         updated_at: now,
     };
-    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -204,7 +207,8 @@ async fn test_place_bid_holds_funds_from_wallet() {
     assert_eq!(holds[0].user_id, "user-1");
     assert_eq!(holds[0].bid_id, bid.id);
     assert_eq!(holds[0].amount, 15); // wallet API uses whole rupiah (1500 cents -> 15)
-    let expected_expiry = now + 300 + bidmart_auction_service_rust::config::bid_hold_grace_seconds();
+    let expected_expiry =
+        now + 300 + bidmart_auction_service_rust::config::bid_hold_grace_seconds();
     assert_eq!(
         holds[0].expires_at,
         chrono::DateTime::<chrono::Utc>::from_timestamp(expected_expiry, 0)
@@ -247,7 +251,10 @@ async fn test_place_bid_releases_wallet_hold_when_bid_persistence_fails() {
         created_at: now,
         updated_at: now,
     };
-    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -292,7 +299,10 @@ async fn test_place_bid_rejected_when_wallet_insufficient_balance() {
         created_at: now,
         updated_at: now,
     };
-    listing_auction_session_repo.insert(&new_auction).await.expect("insert");
+    listing_auction_session_repo
+        .insert(&new_auction)
+        .await
+        .expect("insert");
 
     let result = service
         .place_bid_and_persist(&auction_id, "user-1", 1500, now + 10)
@@ -422,14 +432,18 @@ async fn test_proxy_auto_bid_releases_replaced_winning_hold() {
     assert_eq!(winning_bid.bidder_id, "proxy-a");
     assert_eq!(winning_bid.bid_amount_cents, 5000);
 
-    assert!(wallet_client.get_released_holds().contains(&first_proxy_hold));
+    assert!(
+        wallet_client
+            .get_released_holds()
+            .contains(&first_proxy_hold)
+    );
     let active_holds = wallet_client.get_holds();
     assert_eq!(active_holds.len(), 1);
     assert_eq!(active_holds[0].hold_id, winning_bid.wallet_hold_id.unwrap());
 }
 
 #[tokio::test]
-async fn test_close_won_auction_converts_winning_hold() {
+async fn test_close_won_auction_converts_winning_hold_without_seller_escrow() {
     let pool = setup_test_db().await;
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());

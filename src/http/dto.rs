@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::persistence::models::{ListingAuctionSessionRecord, BidRecord};
+use crate::persistence::models::{BidRecord, ListingAuctionSessionRecord, ProxyBidRecord};
 use crate::service::auction_service::CreateAuctionCommand;
 use crate::service::auction_strategy::AuctionType;
 
@@ -254,6 +254,41 @@ pub struct BidCursorPageResponse {
     pub size: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProxyBidResponse {
+    pub auction_id: String,
+    pub bidder_id: String,
+    pub max_bid_amount_cents: i64,
+    pub active: bool,
+    #[serde(rename = "auctionId")]
+    pub auction_id_api: String,
+    #[serde(rename = "bidderId")]
+    pub bidder_id_api: String,
+    #[serde(rename = "maxBidAmountCents")]
+    pub max_bid_amount_cents_api: i64,
+    #[serde(rename = "maxBidAmount")]
+    pub max_bid_amount: f64,
+}
+
+impl From<ProxyBidRecord> for ProxyBidResponse {
+    fn from(record: ProxyBidRecord) -> Self {
+        let auction_id = record.auction_id;
+        let bidder_id = record.bidder_id;
+        let max_bid_amount_cents = record.max_bid_amount_cents;
+
+        Self {
+            auction_id: auction_id.clone(),
+            bidder_id: bidder_id.clone(),
+            max_bid_amount_cents,
+            active: true,
+            auction_id_api: auction_id,
+            bidder_id_api: bidder_id,
+            max_bid_amount_cents_api: max_bid_amount_cents,
+            max_bid_amount: cents_to_decimal(max_bid_amount_cents),
+        }
+    }
+}
+
 fn cents_to_decimal(cents: i64) -> f64 {
     cents as f64 / 100.0
 }
@@ -281,62 +316,182 @@ fn unix_seconds_to_rfc3339(seconds: i64) -> String {
 mod tests {
     use super::*;
 
-    #[test] fn cents_to_dec() { assert!((cents_to_decimal(1050) - 10.5).abs() < f64::EPSILON); }
-    #[test] fn dec_to_cents() { assert_eq!(decimal_to_cents(10.50), 1050); assert_eq!(decimal_to_cents(99.999), 10000); }
+    #[test]
+    fn cents_to_dec() {
+        assert!((cents_to_decimal(1050) - 10.5).abs() < f64::EPSILON);
+    }
+    #[test]
+    fn dec_to_cents() {
+        assert_eq!(decimal_to_cents(10.50), 1050);
+        assert_eq!(decimal_to_cents(99.999), 10000);
+    }
 
-    #[test] fn resolve_int() { assert_eq!(resolve_unix_seconds(Some(RequestTimestamp::UnixSeconds(100)), "t").unwrap(), 100); }
-    #[test] fn resolve_rfc() { assert!(resolve_unix_seconds(Some(RequestTimestamp::Rfc3339("2026-01-01T00:00:00Z".into())), "t").is_ok()); }
-    #[test] fn resolve_bad_rfc() { assert!(resolve_unix_seconds(Some(RequestTimestamp::Rfc3339("bad".into())), "t").is_err()); }
-    #[test] fn resolve_none() { assert!(resolve_unix_seconds(None, "t").is_err()); }
-    #[test] fn rfc3339_valid() { assert!(unix_seconds_to_rfc3339(1700000000).contains("2023")); }
+    #[test]
+    fn resolve_int() {
+        assert_eq!(
+            resolve_unix_seconds(Some(RequestTimestamp::UnixSeconds(100)), "t").unwrap(),
+            100
+        );
+    }
+    #[test]
+    fn resolve_rfc() {
+        assert!(
+            resolve_unix_seconds(
+                Some(RequestTimestamp::Rfc3339("2026-01-01T00:00:00Z".into())),
+                "t"
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn resolve_bad_rfc() {
+        assert!(resolve_unix_seconds(Some(RequestTimestamp::Rfc3339("bad".into())), "t").is_err());
+    }
+    #[test]
+    fn resolve_none() {
+        assert!(resolve_unix_seconds(None, "t").is_err());
+    }
+    #[test]
+    fn rfc3339_valid() {
+        assert!(unix_seconds_to_rfc3339(1700000000).contains("2023"));
+    }
 
     #[test]
     fn try_into_full_cents() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: Some(1000), starting_price: None, reserve_price_cents: Some(2000), reserve_price: None, minimum_increment_cents: Some(100), minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: Some(1000),
+            starting_price: None,
+            reserve_price_cents: Some(2000),
+            reserve_price: None,
+            minimum_increment_cents: Some(100),
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         let c = r.try_into_command().unwrap();
         assert_eq!(c.starting_price_cents, 1000);
     }
 
     #[test]
     fn try_into_decimal_fallback() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: None, starting_price: Some(10.0), reserve_price_cents: None, reserve_price: Some(20.0), minimum_increment_cents: None, minimum_increment: Some(1.0), start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: None,
+            starting_price: Some(10.0),
+            reserve_price_cents: None,
+            reserve_price: Some(20.0),
+            minimum_increment_cents: None,
+            minimum_increment: Some(1.0),
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         let c = r.try_into_command().unwrap();
         assert_eq!(c.starting_price_cents, 1000);
     }
 
     #[test]
     fn try_into_missing_listing() {
-        let r = CreateAuctionRequest { listing_id: None, seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: Some(1000), starting_price: None, reserve_price_cents: Some(2000), reserve_price: None, minimum_increment_cents: Some(100), minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: None,
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: Some(1000),
+            starting_price: None,
+            reserve_price_cents: Some(2000),
+            reserve_price: None,
+            minimum_increment_cents: Some(100),
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         assert!(r.try_into_command().is_err());
     }
 
     #[test]
     fn try_into_missing_seller() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: None, auction_type: Some("ENGLISH".into()), starting_price_cents: Some(1000), starting_price: None, reserve_price_cents: Some(2000), reserve_price: None, minimum_increment_cents: Some(100), minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: None,
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: Some(1000),
+            starting_price: None,
+            reserve_price_cents: Some(2000),
+            reserve_price: None,
+            minimum_increment_cents: Some(100),
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         assert!(r.try_into_command().is_err());
     }
 
     #[test]
     fn try_into_missing_starting() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: None, starting_price: None, reserve_price_cents: Some(2000), reserve_price: None, minimum_increment_cents: Some(100), minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: None,
+            starting_price: None,
+            reserve_price_cents: Some(2000),
+            reserve_price: None,
+            minimum_increment_cents: Some(100),
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         assert!(r.try_into_command().is_err());
     }
 
     #[test]
     fn try_into_missing_reserve() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: Some(1000), starting_price: None, reserve_price_cents: None, reserve_price: None, minimum_increment_cents: Some(100), minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: Some(1000),
+            starting_price: None,
+            reserve_price_cents: None,
+            reserve_price: None,
+            minimum_increment_cents: Some(100),
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         assert!(r.try_into_command().is_err());
     }
 
     #[test]
     fn try_into_missing_increment() {
-        let r = CreateAuctionRequest { listing_id: Some("l".into()), seller_id: Some("s".into()), auction_type: Some("ENGLISH".into()), starting_price_cents: Some(1000), starting_price: None, reserve_price_cents: Some(2000), reserve_price: None, minimum_increment_cents: None, minimum_increment: None, start_time: Some(RequestTimestamp::UnixSeconds(100)), end_time: Some(RequestTimestamp::UnixSeconds(200)) };
+        let r = CreateAuctionRequest {
+            listing_id: Some("l".into()),
+            seller_id: Some("s".into()),
+            auction_type: Some("ENGLISH".into()),
+            starting_price_cents: Some(1000),
+            starting_price: None,
+            reserve_price_cents: Some(2000),
+            reserve_price: None,
+            minimum_increment_cents: None,
+            minimum_increment: None,
+            start_time: Some(RequestTimestamp::UnixSeconds(100)),
+            end_time: Some(RequestTimestamp::UnixSeconds(200)),
+        };
         assert!(r.try_into_command().is_err());
     }
 
     #[test]
     fn place_bid_req_cents() {
-        let r = PlaceBidRequest { bidder_id: Some("b".into()), bid_amount_cents: Some(5000), bid_amount: None, bid_time: Some(1000) };
+        let r = PlaceBidRequest {
+            bidder_id: Some("b".into()),
+            bid_amount_cents: Some(5000),
+            bid_amount: None,
+            bid_time: Some(1000),
+        };
         assert_eq!(r.bidder_id(), Some("b"));
         assert_eq!(r.bid_amount_cents(), Some(5000));
         assert_eq!(r.bid_time(), 1000);
@@ -344,26 +499,55 @@ mod tests {
 
     #[test]
     fn place_bid_req_dec() {
-        let r = PlaceBidRequest { bidder_id: None, bid_amount_cents: None, bid_amount: Some(50.0), bid_time: None };
+        let r = PlaceBidRequest {
+            bidder_id: None,
+            bid_amount_cents: None,
+            bid_amount: Some(50.0),
+            bid_time: None,
+        };
         assert_eq!(r.bid_amount_cents(), Some(5000));
         assert!(r.bid_time() > 0);
     }
 
     #[test]
     fn proxy_bid_req_cents() {
-        let r = PlaceProxyBidRequest { bidder_id: Some("b".into()), max_bid_amount_cents: Some(10000), max_bid_amount: None, bid_time: Some(1000) };
+        let r = PlaceProxyBidRequest {
+            bidder_id: Some("b".into()),
+            max_bid_amount_cents: Some(10000),
+            max_bid_amount: None,
+            bid_time: Some(1000),
+        };
         assert_eq!(r.max_bid_amount_cents(), Some(10000));
     }
 
     #[test]
     fn proxy_bid_req_dec() {
-        let r = PlaceProxyBidRequest { bidder_id: None, max_bid_amount_cents: None, max_bid_amount: Some(100.0), bid_time: None };
+        let r = PlaceProxyBidRequest {
+            bidder_id: None,
+            max_bid_amount_cents: None,
+            max_bid_amount: Some(100.0),
+            bid_time: None,
+        };
         assert_eq!(r.max_bid_amount_cents(), Some(10000));
     }
 
     #[test]
     fn auction_resp_from() {
-        let rec = ListingAuctionSessionRecord { id: "a".into(), listing_id: "l".into(), seller_id: "s".into(), auction_type: "ENGLISH".into(), starting_price_cents: 1000, reserve_price_cents: 2000, current_highest_bid_cents: Some(1500), minimum_increment_cents: 100, status: "ACTIVE".into(), start_time: 1700000000, end_time: 1700000300, created_at: 1700000000, updated_at: 1700000000 };
+        let rec = ListingAuctionSessionRecord {
+            id: "a".into(),
+            listing_id: "l".into(),
+            seller_id: "s".into(),
+            auction_type: "ENGLISH".into(),
+            starting_price_cents: 1000,
+            reserve_price_cents: 2000,
+            current_highest_bid_cents: Some(1500),
+            minimum_increment_cents: 100,
+            status: "ACTIVE".into(),
+            start_time: 1700000000,
+            end_time: 1700000300,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+        };
         let resp: AuctionResponse = rec.into();
         assert_eq!(resp.id, "a");
         assert!((resp.starting_price - 10.0).abs() < f64::EPSILON);
@@ -372,17 +556,37 @@ mod tests {
 
     #[test]
     fn auction_resp_no_bid() {
-        let rec = ListingAuctionSessionRecord { id: "a".into(), listing_id: "l".into(), seller_id: "s".into(), auction_type: "ENGLISH".into(), starting_price_cents: 500, reserve_price_cents: 1000, current_highest_bid_cents: None, minimum_increment_cents: 50, status: "DRAFT".into(), start_time: 1700000000, end_time: 1700000300, created_at: 1700000000, updated_at: 1700000000 };
+        let rec = ListingAuctionSessionRecord {
+            id: "a".into(),
+            listing_id: "l".into(),
+            seller_id: "s".into(),
+            auction_type: "ENGLISH".into(),
+            starting_price_cents: 500,
+            reserve_price_cents: 1000,
+            current_highest_bid_cents: None,
+            minimum_increment_cents: 50,
+            status: "DRAFT".into(),
+            start_time: 1700000000,
+            end_time: 1700000300,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+        };
         let resp: AuctionResponse = rec.into();
         assert!(resp.current_highest_bid.is_none());
     }
 
     #[test]
     fn bid_resp_from() {
-        let rec = BidRecord { id: "b".into(), auction_id: "a".into(), bidder_id: "u".into(), bid_amount_cents: 5000, bid_time: 1700000010, wallet_hold_id: None };
+        let rec = BidRecord {
+            id: "b".into(),
+            auction_id: "a".into(),
+            bidder_id: "u".into(),
+            bid_amount_cents: 5000,
+            bid_time: 1700000010,
+            wallet_hold_id: None,
+        };
         let resp: BidResponse = rec.into();
         assert_eq!(resp.id, "b");
         assert!((resp.bid_amount - 50.0).abs() < f64::EPSILON);
     }
 }
-

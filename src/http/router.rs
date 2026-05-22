@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::middleware::from_fn;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 
@@ -14,11 +14,12 @@ use crate::http::metrics_auth::require_metrics_basic_auth;
 
 use crate::http::dto::{
     AuctionPageResponse, AuctionResponse, BidCursorPageResponse, BidResponse, CreateAuctionRequest,
-    ErrorResponse, PlaceBidRequest, PlaceProxyBidRequest,
+    ErrorResponse, PlaceBidRequest, PlaceProxyBidRequest, ProxyBidResponse,
 };
 use crate::service::auction_service::{
-    AuctionService, CloseListingAuctionSessionError, CreateAuctionError, GetListingAuctionSessionError, ListListingAuctionSessionsError,
-    ListBidsError, ListPendingClosureError, PlaceBidError,
+    AuctionService, CloseListingAuctionSessionError, CreateAuctionError,
+    GetListingAuctionSessionError, ListBidsError, ListListingAuctionSessionsError,
+    ListPendingClosureError, PlaceBidError,
 };
 
 /// Lightweight, lock-free request metrics counters.
@@ -92,16 +93,33 @@ impl RequestMetrics {
         }
 
         // Cumulative histogram buckets
-        if ms <= 5 { self.latency_le_5ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 25 { self.latency_le_25ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 50 { self.latency_le_50ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 100 { self.latency_le_100ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 250 { self.latency_le_250ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 500 { self.latency_le_500ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 1000 { self.latency_le_1000ms.fetch_add(1, Ordering::Relaxed); }
-        if ms <= 2500 { self.latency_le_2500ms.fetch_add(1, Ordering::Relaxed); }
+        if ms <= 5 {
+            self.latency_le_5ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 25 {
+            self.latency_le_25ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 50 {
+            self.latency_le_50ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 100 {
+            self.latency_le_100ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 250 {
+            self.latency_le_250ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 500 {
+            self.latency_le_500ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 1000 {
+            self.latency_le_1000ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 2500 {
+            self.latency_le_2500ms.fetch_add(1, Ordering::Relaxed);
+        }
         self.latency_le_inf.fetch_add(1, Ordering::Relaxed);
-        self.latency_sum_us.fetch_add(duration_us, Ordering::Relaxed);
+        self.latency_sum_us
+            .fetch_add(duration_us, Ordering::Relaxed);
     }
 }
 
@@ -119,11 +137,18 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/listings", get(list_auctions).post(create_auction))
         .route("/listings/:listing_id", get(get_auction_by_id))
-        .route("/metrics", get(metrics).layer(from_fn(require_metrics_basic_auth)))
+        .route(
+            "/metrics",
+            get(metrics).layer(from_fn(require_metrics_basic_auth)),
+        )
         .route("/listings/:listing_id/bids", get(list_bids).post(place_bid))
         .route(
             "/listings/:listing_id/bids/cursor",
             get(list_bids_cursor).post(place_proxy_bid),
+        )
+        .route(
+            "/listings/:listing_id/proxy-bids/:bidder_id",
+            get(get_proxy_bid).delete(delete_proxy_bid),
         )
         .route("/api/v1/listings", get(list_auctions).post(create_auction))
         .route(
@@ -143,6 +168,10 @@ pub fn create_router(auction_service: AuctionService) -> Router {
             "/api/v1/listings/:listing_id/bids/cursor",
             get(list_bids_cursor).post(place_proxy_bid),
         )
+        .route(
+            "/api/v1/listings/:listing_id/proxy-bids/:bidder_id",
+            get(get_proxy_bid).delete(delete_proxy_bid),
+        )
         .layer(axum::middleware::map_response(security_headers))
         .with_state(state)
 }
@@ -154,7 +183,10 @@ async fn security_headers(mut response: Response) -> Response {
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     headers.insert("x-frame-options", "DENY".parse().unwrap());
     headers.insert("x-xss-protection", "1; mode=block".parse().unwrap());
-    headers.insert("referrer-policy", "strict-origin-when-cross-origin".parse().unwrap());
+    headers.insert(
+        "referrer-policy",
+        "strict-origin-when-cross-origin".parse().unwrap(),
+    );
     headers.insert(
         "cache-control",
         "no-store, no-cache, must-revalidate".parse().unwrap(),
@@ -394,6 +426,35 @@ async fn place_proxy_bid(
     METRICS.bids_placed.fetch_add(1, Ordering::Relaxed);
 
     Ok((StatusCode::CREATED, Json(bid.into())))
+}
+
+async fn get_proxy_bid(
+    State(state): State<AppState>,
+    Path((listing_id, bidder_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<ProxyBidResponse>, ApiError> {
+    let trusted_bidder_id = resolve_trusted_user_id(&headers, Some(&bidder_id), "bidder_id")?;
+    let proxy_bid = state
+        .auction_service
+        .get_proxy_bid(&listing_id, &trusted_bidder_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("proxy bid not found"))?;
+
+    Ok(Json(proxy_bid.into()))
+}
+
+async fn delete_proxy_bid(
+    State(state): State<AppState>,
+    Path((listing_id, bidder_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let trusted_bidder_id = resolve_trusted_user_id(&headers, Some(&bidder_id), "bidder_id")?;
+    state
+        .auction_service
+        .delete_proxy_bid(&listing_id, &trusted_bidder_id)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug)]

@@ -1,8 +1,8 @@
 use sqlx::AnyPool;
 
 use crate::persistence::models::{
-    ListingAuctionSessionRecord, BidRecord, NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
-    OutboxEventRecord, ProxyBidRecord,
+    BidRecord, ListingAuctionSessionRecord, NewBidRecord, NewListingAuctionSessionRecord,
+    NewOutboxEventRecord, OutboxEventRecord, ProxyBidRecord,
 };
 
 #[derive(Debug, Clone)]
@@ -15,7 +15,10 @@ impl ListingAuctionSessionRepository {
         Self { pool }
     }
 
-    pub async fn insert(&self, auction: &NewListingAuctionSessionRecord) -> Result<ListingAuctionSessionRecord, sqlx::Error> {
+    pub async fn insert(
+        &self,
+        auction: &NewListingAuctionSessionRecord,
+    ) -> Result<ListingAuctionSessionRecord, sqlx::Error> {
         sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "INSERT INTO listings (id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state, start_time, end_time, created_at, updated_at) \
@@ -39,7 +42,10 @@ impl ListingAuctionSessionRepository {
         .await
     }
 
-    pub async fn find_by_id(&self, id: &str) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
+    pub async fn find_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ListingAuctionSessionRecord>, sqlx::Error> {
         sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
@@ -75,7 +81,10 @@ impl ListingAuctionSessionRepository {
         .await
     }
 
-    pub async fn list_pending_closure(&self, now: i64) -> Result<Vec<ListingAuctionSessionRecord>, sqlx::Error> {
+    pub async fn list_pending_closure(
+        &self,
+        now: i64,
+    ) -> Result<Vec<ListingAuctionSessionRecord>, sqlx::Error> {
         sqlx::query_as::<_, ListingAuctionSessionRecord>(
             "SELECT id, listing_id, seller_id, auction_type, starting_price_cents, reserve_price_cents, \
              current_highest_bid_cents, minimum_increment_cents, lifecycle_state AS status, start_time, end_time, created_at, updated_at \
@@ -211,10 +220,7 @@ impl ProxyBidRepository {
             "INSERT INTO proxy_bids (listing_id, bidder_id, max_bid_amount_cents, created_at, updated_at) \
              VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (listing_id, bidder_id) DO UPDATE \
-             SET max_bid_amount_cents = CASE \
-                   WHEN excluded.max_bid_amount_cents > proxy_bids.max_bid_amount_cents THEN excluded.max_bid_amount_cents \
-                   ELSE proxy_bids.max_bid_amount_cents \
-                 END, \
+             SET max_bid_amount_cents = excluded.max_bid_amount_cents, \
                  updated_at = excluded.updated_at \
              RETURNING listing_id AS auction_id, bidder_id, max_bid_amount_cents, created_at, updated_at",
         )
@@ -239,6 +245,34 @@ impl ProxyBidRepository {
         .bind(auction_id)
         .fetch_all(&self.pool)
         .await
+    }
+
+    pub async fn find_by_bidder(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+    ) -> Result<Option<ProxyBidRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ProxyBidRecord>(
+            "SELECT listing_id AS auction_id, bidder_id, max_bid_amount_cents, created_at, updated_at \
+             FROM proxy_bids WHERE listing_id = $1 AND bidder_id = $2",
+        )
+        .bind(auction_id)
+        .bind(bidder_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn delete_for_bidder(
+        &self,
+        auction_id: &str,
+        bidder_id: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM proxy_bids WHERE listing_id = $1 AND bidder_id = $2")
+            .bind(auction_id)
+            .bind(bidder_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 }
 

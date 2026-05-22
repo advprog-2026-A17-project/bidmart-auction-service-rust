@@ -1,5 +1,6 @@
 use bidmart_auction_service_rust::listing_auction_session::{
-    ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStateError, ListingAuctionSessionStatus, BidError, Money, UnixSeconds, UserId,
+    BidError, ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStateError,
+    ListingAuctionSessionStatus, Money, UnixSeconds, UserId,
 };
 
 fn sample_auction(start_at: u64, end_at: u64) -> ListingAuctionSession {
@@ -45,7 +46,10 @@ fn reject_activation_before_start() {
 
     let result = auction.activate(UnixSeconds::new(50));
 
-    assert!(matches!(result, Err(ListingAuctionSessionStateError::TooEarly { .. })));
+    assert!(matches!(
+        result,
+        Err(ListingAuctionSessionStateError::TooEarly { .. })
+    ));
 }
 
 #[test]
@@ -263,7 +267,11 @@ fn reject_bid_after_end_time() {
         UnixSeconds::new(100),
     );
 
-    assert!(matches!(result, Err(BidError::AuctionEnded { .. })), "Unexpected result: {:?}", result);
+    assert!(
+        matches!(result, Err(BidError::AuctionEnded { .. })),
+        "Unexpected result: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -387,6 +395,34 @@ fn proxy_bid_places_minimum_valid_amount() {
         .expect("proxy bid accepted");
 
     assert_eq!(result.new_highest.amount, Money::from_cents(12_00));
+}
+
+#[test]
+fn proxy_bid_allows_current_winner_without_raising_current_price() {
+    let mut auction = sample_auction(0, 500);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(10),
+        )
+        .expect("seed bid accepted");
+
+    let result = auction
+        .place_proxy_bid(
+            UserId::new("user-1"),
+            Money::from_cents(20_00),
+            UnixSeconds::new(20),
+        )
+        .expect("current winner can set proxy");
+
+    assert_eq!(result.new_highest.amount, Money::from_cents(10_00));
+    assert_eq!(
+        auction.current_highest().expect("highest bid").amount,
+        Money::from_cents(10_00)
+    );
 }
 
 #[test]

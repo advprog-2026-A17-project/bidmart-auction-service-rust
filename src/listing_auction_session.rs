@@ -376,20 +376,7 @@ impl ListingAuctionSession {
         amount: Money,
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
-        lifecycle_state(self.status).ensure_can_bid()?;
-
-        if now < self.start_at {
-            return Err(BidError::AuctionNotStarted {
-                start_at: self.start_at,
-            });
-        }
-
-        if now >= self.end_at {
-            self.status = ListingAuctionSessionStatus::Closed;
-            return Err(BidError::AuctionEnded {
-                end_at: self.end_at,
-            });
-        }
+        self.ensure_accepting_bids(now)?;
 
         // Seller cannot bid on their own auction
         if bidder_id == self.seller_id {
@@ -433,6 +420,29 @@ impl ListingAuctionSession {
         max_amount: Money,
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
+        self.ensure_accepting_bids(now)?;
+
+        if bidder_id == self.seller_id {
+            return Err(BidError::SelfBiddingNotAllowed { bidder_id });
+        }
+
+        if let Some(current) = &self.current_highest {
+            if current.bidder_id == bidder_id {
+                if max_amount < current.amount {
+                    return Err(BidError::BidTooLow {
+                        minimum: current.amount,
+                    });
+                }
+
+                return Ok(BidAccepted {
+                    new_highest: current.clone(),
+                    previous_highest: Some(current.clone()),
+                    extended: false,
+                    new_end_at: self.end_at,
+                });
+            }
+        }
+
         let minimum_required = self.minimum_required_bid();
         if max_amount < minimum_required {
             return Err(BidError::BidTooLow {
@@ -448,6 +458,25 @@ impl ListingAuctionSession {
             Some(bid) => bid.amount + self.minimum_increment,
             None => self.starting_price,
         }
+    }
+
+    fn ensure_accepting_bids(&mut self, now: UnixSeconds) -> Result<(), BidError> {
+        lifecycle_state(self.status).ensure_can_bid()?;
+
+        if now < self.start_at {
+            return Err(BidError::AuctionNotStarted {
+                start_at: self.start_at,
+            });
+        }
+
+        if now >= self.end_at {
+            self.status = ListingAuctionSessionStatus::Closed;
+            return Err(BidError::AuctionEnded {
+                end_at: self.end_at,
+            });
+        }
+
+        Ok(())
     }
 
     /// Anti-sniping: extends auction by 2 minutes if bid is within last 2 minutes.

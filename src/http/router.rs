@@ -6,8 +6,11 @@ use std::time::Instant;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::middleware::from_fn;
 use axum::routing::get;
 use axum::{Json, Router};
+
+use crate::http::metrics_auth::require_metrics_basic_auth;
 
 use crate::http::dto::{
     AuctionPageResponse, AuctionResponse, BidCursorPageResponse, BidResponse, CreateAuctionRequest,
@@ -116,7 +119,7 @@ pub fn create_router(auction_service: AuctionService) -> Router {
     Router::new()
         .route("/listings", get(list_auctions).post(create_auction))
         .route("/listings/:listing_id", get(get_auction_by_id))
-        .route("/metrics", get(metrics))
+        .route("/metrics", get(metrics).layer(from_fn(require_metrics_basic_auth)))
         .route("/listings/:listing_id/bids", get(list_bids).post(place_bid))
         .route(
             "/listings/:listing_id/bids/cursor",

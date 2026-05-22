@@ -1,6 +1,0 @@
-# APDEX baseline (naive domain microbench — CPU-bound, not I/O)
-# Same harness parameters; naive domain path simulated via profile_bidding_naive binary
-generated_at: 2026-05-20T00:00:00Z
-workload: profile_bidding_naive 10000x200 place_bid
-apdex_T100ms: 1.000
-note: APDEX at HTTP layer may differ; compare bidmart_apdex_score on /metrics after load test.

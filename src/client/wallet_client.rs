@@ -1,3 +1,7 @@
+use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tonic::client::Grpc;
@@ -74,6 +78,71 @@ pub trait WalletClient: Send + Sync {
         amount: u64,
         correlation_id: &str,
     ) -> Result<(), WalletClientError>;
+}
+
+#[derive(Clone)]
+pub struct WalletClientProxy {
+    inner: Arc<dyn WalletClient>,
+    timeout: Duration,
+}
+
+impl WalletClientProxy {
+    pub fn new(inner: Arc<dyn WalletClient>) -> Self {
+        let timeout_ms = std::env::var("WALLET_CLIENT_TIMEOUT_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(3_000);
+
+        Self {
+            inner,
+            timeout: Duration::from_millis(timeout_ms),
+        }
+    }
+
+    async fn guarded<T, Fut>(&self, operation: Fut) -> Result<T, WalletClientError>
+    where
+        Fut: Future<Output = Result<T, WalletClientError>> + Send,
+    {
+        match tokio::time::timeout(self.timeout, operation).await {
+            Ok(result) => result,
+            Err(_) => Err(WalletClientError::NetworkError(
+                "wallet service unavailable or timed out".to_string(),
+            )),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl WalletClient for WalletClientProxy {
+    async fn hold_funds(
+        &self,
+        request: HoldFundsRequest,
+    ) -> Result<HoldResponse, WalletClientError> {
+        self.guarded(self.inner.hold_funds(request)).await
+    }
+
+    async fn release_hold(&self, hold_id: &str) -> Result<(), WalletClientError> {
+        self.guarded(self.inner.release_hold(hold_id)).await
+    }
+
+    async fn convert_hold_to_payment(&self, hold_id: &str) -> Result<(), WalletClientError> {
+        self.guarded(self.inner.convert_hold_to_payment(hold_id))
+            .await
+    }
+
+    async fn credit_seller_escrow(
+        &self,
+        seller_id: &str,
+        amount: u64,
+        correlation_id: &str,
+    ) -> Result<(), WalletClientError> {
+        self.guarded(
+            self.inner
+                .credit_seller_escrow(seller_id, amount, correlation_id),
+        )
+        .await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -369,7 +438,6 @@ impl WalletClientError {
         }
     }
 }
-
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 struct GrpcHoldFundsRequest {

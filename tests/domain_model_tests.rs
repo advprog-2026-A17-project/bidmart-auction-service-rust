@@ -41,9 +41,14 @@ fn session_with_bid(status: ListingAuctionSessionStatus, bid_cents: u64) -> List
 #[test]
 fn new_session_starts_in_draft_status() {
     let s = ListingAuctionSession::new(
-        "s-1", "l-1", "seller-1",
-        Money::from_cents(100), Money::from_cents(10),
-        Money::from_cents(500), UnixSeconds::new(100), UnixSeconds::new(200),
+        "s-1",
+        "l-1",
+        "seller-1",
+        Money::from_cents(100),
+        Money::from_cents(10),
+        Money::from_cents(500),
+        UnixSeconds::new(100),
+        UnixSeconds::new(200),
     );
     assert_eq!(s.status(), ListingAuctionSessionStatus::Draft);
     assert!(s.current_highest().is_none());
@@ -54,6 +59,26 @@ fn new_session_starts_in_draft_status() {
 fn with_status_preserves_given_status() {
     let s = session(ListingAuctionSessionStatus::Active);
     assert_eq!(s.status(), ListingAuctionSessionStatus::Active);
+}
+
+#[test]
+fn lifecycle_state_handlers_gate_bid_permissions() {
+    assert!(
+        lifecycle_state(ListingAuctionSessionStatus::Active)
+            .ensure_can_bid()
+            .is_ok()
+    );
+    assert!(
+        lifecycle_state(ListingAuctionSessionStatus::Extended)
+            .ensure_can_bid()
+            .is_ok()
+    );
+    assert!(matches!(
+        lifecycle_state(ListingAuctionSessionStatus::Draft)
+            .ensure_can_bid()
+            .unwrap_err(),
+        BidError::AuctionNotActive { .. }
+    ));
 }
 
 // ============================================
@@ -78,35 +103,50 @@ fn activate_cancelled_returns_error() {
 fn activate_too_early_returns_error() {
     let mut s = session(ListingAuctionSessionStatus::Draft);
     let err = s.activate(UnixSeconds::new(50)).unwrap_err();
-    assert!(matches!(err, ListingAuctionSessionStateError::TooEarly { .. }));
+    assert!(matches!(
+        err,
+        ListingAuctionSessionStateError::TooEarly { .. }
+    ));
 }
 
 #[test]
 fn activate_closed_session_returns_already_ended() {
     let mut s = session(ListingAuctionSessionStatus::Closed);
     let err = s.activate(UnixSeconds::new(150)).unwrap_err();
-    assert!(matches!(err, ListingAuctionSessionStateError::AlreadyEnded { .. }));
+    assert!(matches!(
+        err,
+        ListingAuctionSessionStateError::AlreadyEnded { .. }
+    ));
 }
 
 #[test]
 fn activate_won_session_returns_already_ended() {
     let mut s = session(ListingAuctionSessionStatus::Won);
     let err = s.activate(UnixSeconds::new(150)).unwrap_err();
-    assert!(matches!(err, ListingAuctionSessionStateError::AlreadyEnded { .. }));
+    assert!(matches!(
+        err,
+        ListingAuctionSessionStateError::AlreadyEnded { .. }
+    ));
 }
 
 #[test]
 fn activate_unsold_session_returns_already_ended() {
     let mut s = session(ListingAuctionSessionStatus::Unsold);
     let err = s.activate(UnixSeconds::new(150)).unwrap_err();
-    assert!(matches!(err, ListingAuctionSessionStateError::AlreadyEnded { .. }));
+    assert!(matches!(
+        err,
+        ListingAuctionSessionStateError::AlreadyEnded { .. }
+    ));
 }
 
 #[test]
 fn activate_past_end_time_transitions_to_closed() {
     let mut s = session(ListingAuctionSessionStatus::Draft);
     let err = s.activate(UnixSeconds::new(1500)).unwrap_err();
-    assert!(matches!(err, ListingAuctionSessionStateError::AlreadyEnded { .. }));
+    assert!(matches!(
+        err,
+        ListingAuctionSessionStateError::AlreadyEnded { .. }
+    ));
     assert_eq!(s.status(), ListingAuctionSessionStatus::Closed);
 }
 
@@ -182,7 +222,11 @@ fn determine_outcome_won_when_bid_equals_reserve() {
 #[test]
 fn place_bid_succeeds_on_active_auction() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let result = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(500));
+    let result = s.place_bid(
+        UserId::new("buyer-1"),
+        Money::from_cents(1000),
+        UnixSeconds::new(500),
+    );
     assert!(result.is_ok());
     let accepted = result.unwrap();
     assert_eq!(accepted.new_highest.amount, Money::from_cents(1000));
@@ -192,28 +236,50 @@ fn place_bid_succeeds_on_active_auction() {
 #[test]
 fn place_bid_succeeds_on_extended_auction() {
     let mut s = session(ListingAuctionSessionStatus::Extended);
-    let result = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(500));
+    let result = s.place_bid(
+        UserId::new("buyer-1"),
+        Money::from_cents(1000),
+        UnixSeconds::new(500),
+    );
     assert!(result.is_ok());
 }
 
 #[test]
 fn place_bid_rejects_draft_auction() {
     let mut s = session(ListingAuctionSessionStatus::Draft);
-    let err = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(1000),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::AuctionNotActive { .. }));
 }
 
 #[test]
 fn place_bid_rejects_before_start() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let err = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(50)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(1000),
+            UnixSeconds::new(50),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::AuctionNotStarted { .. }));
 }
 
 #[test]
 fn place_bid_rejects_after_end_and_closes() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let err = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(1500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(1000),
+            UnixSeconds::new(1500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::AuctionEnded { .. }));
     assert_eq!(s.status(), ListingAuctionSessionStatus::Closed);
 }
@@ -221,21 +287,39 @@ fn place_bid_rejects_after_end_and_closes() {
 #[test]
 fn place_bid_rejects_seller_bidding() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let err = s.place_bid(UserId::new("seller-1"), Money::from_cents(1000), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("seller-1"),
+            Money::from_cents(1000),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::SelfBiddingNotAllowed { .. }));
 }
 
 #[test]
 fn place_bid_rejects_current_winner_rebid() {
     let mut s = session_with_bid(ListingAuctionSessionStatus::Active, 2000);
-    let err = s.place_bid(UserId::new("buyer-1"), Money::from_cents(3000), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(3000),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::SelfBiddingNotAllowed { .. }));
 }
 
 #[test]
 fn place_bid_rejects_below_minimum() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let err = s.place_bid(UserId::new("buyer-1"), Money::from_cents(500), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(500),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::BidTooLow { .. }));
 }
 
@@ -243,10 +327,20 @@ fn place_bid_rejects_below_minimum() {
 fn place_bid_increments_properly() {
     let mut s = session_with_bid(ListingAuctionSessionStatus::Active, 2000);
     // minimum_increment = 100, so minimum = 2100
-    let err = s.place_bid(UserId::new("buyer-2"), Money::from_cents(2050), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_bid(
+            UserId::new("buyer-2"),
+            Money::from_cents(2050),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::BidTooLow { .. }));
 
-    let result = s.place_bid(UserId::new("buyer-2"), Money::from_cents(2100), UnixSeconds::new(500));
+    let result = s.place_bid(
+        UserId::new("buyer-2"),
+        Money::from_cents(2100),
+        UnixSeconds::new(500),
+    );
     assert!(result.is_ok());
 }
 
@@ -258,7 +352,11 @@ fn place_bid_increments_properly() {
 fn bid_near_end_triggers_extension() {
     let mut s = session(ListingAuctionSessionStatus::Active);
     // end_at = 1000, bid at 950 (50s remaining < 120s window)
-    let result = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(950));
+    let result = s.place_bid(
+        UserId::new("buyer-1"),
+        Money::from_cents(1000),
+        UnixSeconds::new(950),
+    );
     assert!(result.is_ok());
     let accepted = result.unwrap();
     assert!(accepted.extended);
@@ -271,7 +369,11 @@ fn bid_near_end_triggers_extension() {
 fn bid_not_near_end_does_not_extend() {
     let mut s = session(ListingAuctionSessionStatus::Active);
     // end_at = 1000, bid at 500 (500s remaining > 120s window)
-    let result = s.place_bid(UserId::new("buyer-1"), Money::from_cents(1000), UnixSeconds::new(500));
+    let result = s.place_bid(
+        UserId::new("buyer-1"),
+        Money::from_cents(1000),
+        UnixSeconds::new(500),
+    );
     assert!(result.is_ok());
     assert!(!result.unwrap().extended);
     assert_eq!(s.extensions(), 0);
@@ -313,7 +415,11 @@ fn unlimited_extensions_allowed() {
 #[test]
 fn proxy_bid_uses_minimum_required_amount() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let result = s.place_proxy_bid(UserId::new("buyer-1"), Money::from_cents(5000), UnixSeconds::new(500));
+    let result = s.place_proxy_bid(
+        UserId::new("buyer-1"),
+        Money::from_cents(5000),
+        UnixSeconds::new(500),
+    );
     assert!(result.is_ok());
     // Starting price is 1000, so proxy bid should be exactly 1000 (minimum required)
     assert_eq!(result.unwrap().new_highest.amount, Money::from_cents(1000));
@@ -322,7 +428,13 @@ fn proxy_bid_uses_minimum_required_amount() {
 #[test]
 fn proxy_bid_rejects_when_max_below_minimum() {
     let mut s = session(ListingAuctionSessionStatus::Active);
-    let err = s.place_proxy_bid(UserId::new("buyer-1"), Money::from_cents(500), UnixSeconds::new(500)).unwrap_err();
+    let err = s
+        .place_proxy_bid(
+            UserId::new("buyer-1"),
+            Money::from_cents(500),
+            UnixSeconds::new(500),
+        )
+        .unwrap_err();
     assert!(matches!(err, BidError::BidTooLow { .. }));
 }
 
@@ -379,18 +491,28 @@ fn accessors_return_correct_values() {
 
 #[test]
 fn bid_error_display_messages() {
-    let e = BidError::AuctionNotActive { status: ListingAuctionSessionStatus::Draft };
+    let e = BidError::AuctionNotActive {
+        status: ListingAuctionSessionStatus::Draft,
+    };
     assert!(format!("{e}").contains("not active"));
 
-    let e = BidError::BidTooLow { minimum: Money::from_cents(100) };
+    let e = BidError::BidTooLow {
+        minimum: Money::from_cents(100),
+    };
     assert!(format!("{e}").contains("minimum"));
 
-    let e = BidError::SelfBiddingNotAllowed { bidder_id: UserId::new("u-1") };
+    let e = BidError::SelfBiddingNotAllowed {
+        bidder_id: UserId::new("u-1"),
+    };
     assert!(format!("{e}").contains("self bidding"));
 
-    let e = BidError::AuctionNotStarted { start_at: UnixSeconds::new(100) };
+    let e = BidError::AuctionNotStarted {
+        start_at: UnixSeconds::new(100),
+    };
     assert!(format!("{e}").contains("not started"));
 
-    let e = BidError::AuctionEnded { end_at: UnixSeconds::new(200) };
+    let e = BidError::AuctionEnded {
+        end_at: UnixSeconds::new(200),
+    };
     assert!(format!("{e}").contains("ended"));
 }

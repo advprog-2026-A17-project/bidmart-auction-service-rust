@@ -98,6 +98,106 @@ pub enum ListingAuctionSessionStatus {
     Cancelled,
 }
 
+pub trait AuctionLifecycleState: Sync {
+    fn status(&self) -> ListingAuctionSessionStatus;
+
+    fn ensure_can_bid(&self) -> Result<(), BidError> {
+        Err(BidError::AuctionNotActive {
+            status: self.status(),
+        })
+    }
+
+    fn status_after_extension(&self) -> ListingAuctionSessionStatus {
+        self.status()
+    }
+}
+
+struct DraftState;
+struct ActiveState;
+struct ExtendedState;
+struct ClosedState;
+struct WonState;
+struct UnsoldState;
+struct CancelledState;
+
+impl AuctionLifecycleState for DraftState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Draft
+    }
+}
+
+impl AuctionLifecycleState for ActiveState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Active
+    }
+
+    fn ensure_can_bid(&self) -> Result<(), BidError> {
+        Ok(())
+    }
+
+    fn status_after_extension(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Extended
+    }
+}
+
+impl AuctionLifecycleState for ExtendedState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Extended
+    }
+
+    fn ensure_can_bid(&self) -> Result<(), BidError> {
+        Ok(())
+    }
+
+    fn status_after_extension(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Extended
+    }
+}
+
+impl AuctionLifecycleState for ClosedState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Closed
+    }
+}
+
+impl AuctionLifecycleState for WonState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Won
+    }
+}
+
+impl AuctionLifecycleState for UnsoldState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Unsold
+    }
+}
+
+impl AuctionLifecycleState for CancelledState {
+    fn status(&self) -> ListingAuctionSessionStatus {
+        ListingAuctionSessionStatus::Cancelled
+    }
+}
+
+static DRAFT_STATE: DraftState = DraftState;
+static ACTIVE_STATE: ActiveState = ActiveState;
+static EXTENDED_STATE: ExtendedState = ExtendedState;
+static CLOSED_STATE: ClosedState = ClosedState;
+static WON_STATE: WonState = WonState;
+static UNSOLD_STATE: UnsoldState = UnsoldState;
+static CANCELLED_STATE: CancelledState = CancelledState;
+
+pub fn lifecycle_state(status: ListingAuctionSessionStatus) -> &'static dyn AuctionLifecycleState {
+    match status {
+        ListingAuctionSessionStatus::Draft => &DRAFT_STATE,
+        ListingAuctionSessionStatus::Active => &ACTIVE_STATE,
+        ListingAuctionSessionStatus::Extended => &EXTENDED_STATE,
+        ListingAuctionSessionStatus::Closed => &CLOSED_STATE,
+        ListingAuctionSessionStatus::Won => &WON_STATE,
+        ListingAuctionSessionStatus::Unsold => &UNSOLD_STATE,
+        ListingAuctionSessionStatus::Cancelled => &CANCELLED_STATE,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListingAuctionSessionOutcome {
     Won,    // Reserve met and has winner
@@ -276,11 +376,7 @@ impl ListingAuctionSession {
         amount: Money,
         now: UnixSeconds,
     ) -> Result<BidAccepted, BidError> {
-        if self.status != ListingAuctionSessionStatus::Active && self.status != ListingAuctionSessionStatus::Extended {
-            return Err(BidError::AuctionNotActive {
-                status: self.status,
-            });
-        }
+        lifecycle_state(self.status).ensure_can_bid()?;
 
         if now < self.start_at {
             return Err(BidError::AuctionNotStarted {
@@ -361,7 +457,7 @@ impl ListingAuctionSession {
         if remaining <= ANTI_SNIPING_WINDOW_SECS {
             self.end_at = now.add_secs(ANTI_SNIPING_EXTENSION_SECS);
             self.extensions += 1;
-            self.status = ListingAuctionSessionStatus::Extended;
+            self.status = lifecycle_state(self.status).status_after_extension();
             return true;
         }
         false

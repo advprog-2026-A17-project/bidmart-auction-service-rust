@@ -7,5 +7,5 @@ pub use catalog_client::{
 };
 pub use wallet_client::{
     GrpcWalletClient, HoldFundsRequest, HoldResponse, HttpWalletClient, WalletClient,
-    WalletClientError,
+    WalletClientError, WalletClientProxy,
 };

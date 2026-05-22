@@ -1,4 +1,7 @@
-use bidmart_auction_service_rust::service::auction_strategy::{AuctionType, resolve_strategy};
+use bidmart_auction_service_rust::service::auction_service::CreateAuctionError;
+use bidmart_auction_service_rust::service::auction_strategy::{
+    AuctionStrategy, AuctionStrategyRegistry, AuctionType, resolve_strategy,
+};
 
 #[test]
 fn parse_english_type_default() {
@@ -8,37 +11,58 @@ fn parse_english_type_default() {
 
 #[test]
 fn parse_english_type_explicit() {
-    assert_eq!(AuctionType::from_input(Some("ENGLISH")).unwrap(), AuctionType::English);
+    assert_eq!(
+        AuctionType::from_input(Some("ENGLISH")).unwrap(),
+        AuctionType::English
+    );
 }
 
 #[test]
 fn parse_english_type_lowercase() {
-    assert_eq!(AuctionType::from_input(Some("english")).unwrap(), AuctionType::English);
+    assert_eq!(
+        AuctionType::from_input(Some("english")).unwrap(),
+        AuctionType::English
+    );
 }
 
 #[test]
 fn parse_english_type_with_whitespace() {
-    assert_eq!(AuctionType::from_input(Some("  English  ")).unwrap(), AuctionType::English);
+    assert_eq!(
+        AuctionType::from_input(Some("  English  ")).unwrap(),
+        AuctionType::English
+    );
 }
 
 #[test]
 fn parse_scholarship_type() {
-    assert_eq!(AuctionType::from_input(Some("SCHOLARSHIP")).unwrap(), AuctionType::Scholarship);
+    assert_eq!(
+        AuctionType::from_input(Some("SCHOLARSHIP")).unwrap(),
+        AuctionType::Scholarship
+    );
 }
 
 #[test]
 fn parse_multi_slot_type() {
-    assert_eq!(AuctionType::from_input(Some("MULTI_SLOT")).unwrap(), AuctionType::MultiSlotRegional);
+    assert_eq!(
+        AuctionType::from_input(Some("MULTI_SLOT")).unwrap(),
+        AuctionType::MultiSlotRegional
+    );
 }
 
 #[test]
 fn parse_multi_slot_regional_type() {
-    assert_eq!(AuctionType::from_input(Some("MULTI_SLOT_REGIONAL")).unwrap(), AuctionType::MultiSlotRegional);
+    assert_eq!(
+        AuctionType::from_input(Some("MULTI_SLOT_REGIONAL")).unwrap(),
+        AuctionType::MultiSlotRegional
+    );
 }
 
 #[test]
 fn parse_enterprise_type() {
-    assert_eq!(AuctionType::from_input(Some("ENTERPRISE")).unwrap(), AuctionType::Enterprise);
+    assert_eq!(
+        AuctionType::from_input(Some("ENTERPRISE")).unwrap(),
+        AuctionType::Enterprise
+    );
 }
 
 #[test]
@@ -60,7 +84,10 @@ fn storage_value_scholarship() {
 
 #[test]
 fn storage_value_multi_slot() {
-    assert_eq!(AuctionType::MultiSlotRegional.as_storage_value(), "MULTI_SLOT_REGIONAL");
+    assert_eq!(
+        AuctionType::MultiSlotRegional.as_storage_value(),
+        "MULTI_SLOT_REGIONAL"
+    );
 }
 
 #[test]
@@ -97,4 +124,34 @@ fn enterprise_strategy_returns_unsupported_error() {
     let err = strategy.validate_create_request().unwrap_err();
     let message = format!("{err}");
     assert!(message.contains("ENTERPRISE"));
+}
+
+struct MbgStubStrategy;
+
+impl AuctionStrategy for MbgStubStrategy {
+    fn validate_create_request(&self) -> Result<(), CreateAuctionError> {
+        Ok(())
+    }
+}
+
+fn mbg_stub_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(MbgStubStrategy)
+}
+
+#[test]
+fn registry_can_add_mbg_strategy_without_changing_core_resolver() {
+    let mut registry = AuctionStrategyRegistry::default_registry();
+    registry.register(AuctionType::MultiSlotRegional, mbg_stub_factory);
+
+    assert!(
+        registry
+            .resolve(AuctionType::MultiSlotRegional)
+            .validate_create_request()
+            .is_ok()
+    );
+    assert!(
+        resolve_strategy(AuctionType::MultiSlotRegional)
+            .validate_create_request()
+            .is_err()
+    );
 }

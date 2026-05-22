@@ -1,6 +1,6 @@
 use crate::service::auction_service::CreateAuctionError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuctionType {
     English,
     Scholarship,
@@ -36,19 +36,68 @@ pub trait AuctionStrategy: Send + Sync {
     fn validate_create_request(&self) -> Result<(), CreateAuctionError>;
 }
 
-pub fn resolve_strategy(auction_type: AuctionType) -> Box<dyn AuctionStrategy> {
-    match auction_type {
-        AuctionType::English => Box::new(EnglishAuctionStrategy),
-        AuctionType::Scholarship => Box::new(UnsupportedAuctionStrategy {
-            auction_type: AuctionType::Scholarship,
-        }),
-        AuctionType::MultiSlotRegional => Box::new(UnsupportedAuctionStrategy {
-            auction_type: AuctionType::MultiSlotRegional,
-        }),
-        AuctionType::Enterprise => Box::new(UnsupportedAuctionStrategy {
-            auction_type: AuctionType::Enterprise,
-        }),
+type StrategyFactory = fn() -> Box<dyn AuctionStrategy>;
+
+pub struct AuctionStrategyRegistry {
+    factories: std::collections::HashMap<AuctionType, StrategyFactory>,
+}
+
+impl AuctionStrategyRegistry {
+    pub fn default_registry() -> Self {
+        let mut registry = Self {
+            factories: std::collections::HashMap::new(),
+        };
+        registry.register(AuctionType::English, english_strategy_factory);
+        registry.register(AuctionType::Scholarship, scholarship_strategy_factory);
+        registry.register(AuctionType::MultiSlotRegional, multi_slot_strategy_factory);
+        registry.register(AuctionType::Enterprise, enterprise_strategy_factory);
+        registry
     }
+
+    pub fn register(&mut self, auction_type: AuctionType, factory: StrategyFactory) {
+        self.factories.insert(auction_type, factory);
+    }
+
+    pub fn resolve(&self, auction_type: AuctionType) -> Box<dyn AuctionStrategy> {
+        let factory = self
+            .factories
+            .get(&auction_type)
+            .copied()
+            .unwrap_or(unsupported_strategy_factory);
+        factory()
+    }
+}
+
+pub fn resolve_strategy(auction_type: AuctionType) -> Box<dyn AuctionStrategy> {
+    AuctionStrategyRegistry::default_registry().resolve(auction_type)
+}
+
+fn english_strategy_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(EnglishAuctionStrategy)
+}
+
+fn scholarship_strategy_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(UnsupportedAuctionStrategy {
+        auction_type: AuctionType::Scholarship,
+    })
+}
+
+fn multi_slot_strategy_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(UnsupportedAuctionStrategy {
+        auction_type: AuctionType::MultiSlotRegional,
+    })
+}
+
+fn enterprise_strategy_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(UnsupportedAuctionStrategy {
+        auction_type: AuctionType::Enterprise,
+    })
+}
+
+fn unsupported_strategy_factory() -> Box<dyn AuctionStrategy> {
+    Box::new(UnsupportedAuctionStrategy {
+        auction_type: AuctionType::English,
+    })
 }
 
 struct EnglishAuctionStrategy;

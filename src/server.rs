@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 use crate::client::{
     CatalogClient, CatalogClientError, GrpcCatalogClient, GrpcWalletClient, HttpCatalogClient,
-    HttpWalletClient, WalletClient, WalletClientError,
+    HttpWalletClient, WalletClient, WalletClientError, WalletClientProxy,
 };
 use crate::http::router::create_router;
-use crate::persistence::repositories::{ListingAuctionSessionRepository, BidRepository, OutboxRepository};
+use crate::persistence::repositories::{
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
+};
 use crate::service::auction_service::AuctionService;
 
 pub fn default_database_url() -> String {
@@ -73,7 +75,8 @@ pub fn wallet_client_from_url(
         return Ok(None);
     };
 
-    Ok(Some(Arc::new(HttpWalletClient::new(base_url)?)))
+    let client: Arc<dyn WalletClient> = Arc::new(HttpWalletClient::new(base_url)?);
+    Ok(Some(Arc::new(WalletClientProxy::new(client))))
 }
 
 /// Prefer HTTP when both endpoints are configured: seller escrow and other
@@ -83,11 +86,13 @@ pub fn wallet_client_from_endpoints(
     http_base_url: Option<&str>,
 ) -> Result<Option<Arc<dyn WalletClient>>, WalletClientError> {
     if let Some(http_base_url) = http_base_url.filter(|value| !value.trim().is_empty()) {
-        return Ok(Some(Arc::new(HttpWalletClient::new(http_base_url)?)));
+        let client: Arc<dyn WalletClient> = Arc::new(HttpWalletClient::new(http_base_url)?);
+        return Ok(Some(Arc::new(WalletClientProxy::new(client))));
     }
 
     if let Some(grpc_endpoint) = grpc_endpoint.filter(|value| !value.trim().is_empty()) {
-        return Ok(Some(Arc::new(GrpcWalletClient::new(grpc_endpoint)?)));
+        let client: Arc<dyn WalletClient> = Arc::new(GrpcWalletClient::new(grpc_endpoint)?);
+        return Ok(Some(Arc::new(WalletClientProxy::new(client))));
     }
 
     Ok(None)

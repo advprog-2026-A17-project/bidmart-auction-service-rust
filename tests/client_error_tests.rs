@@ -1,7 +1,7 @@
 //! Tests for WalletClientError and CatalogClientError Display/conversion paths.
 
-use bidmart_auction_service_rust::client::wallet_client::*;
 use bidmart_auction_service_rust::client::catalog_client::*;
+use bidmart_auction_service_rust::client::wallet_client::*;
 
 // ============================
 // WalletClientError Display
@@ -161,4 +161,3 @@ async fn grpc_catalog_fails_on_unreachable_server() {
     let result = client.get_listing_summary("listing-1").await;
     assert!(result.is_err());
 }
-

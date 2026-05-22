@@ -19,6 +19,14 @@ pub fn resolve_auction_closure_interval_ms() -> u64 {
         .unwrap_or(1000)
 }
 
+pub fn resolve_auction_closure_batch_size() -> i64 {
+    env::var("AUCTION_CLOSURE_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(50)
+}
+
 pub fn resolve_outbox_interval_ms() -> u64 {
     env::var("OUTBOX_SCHEDULER_INTERVAL_MS")
         .ok()
@@ -26,9 +34,23 @@ pub fn resolve_outbox_interval_ms() -> u64 {
         .unwrap_or(1000)
 }
 
+pub fn resolve_outbox_batch_size() -> i64 {
+    env::var("OUTBOX_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(50)
+}
+
+pub fn resolve_scheduler_jitter_ms() -> u64 {
+    env::var("SCHEDULER_JITTER_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
 pub fn resolve_rabbitmq_url() -> String {
-    env::var("RABBITMQ_URL")
-        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string())
+    env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string())
 }
 
 pub fn resolve_events_exchange() -> String {

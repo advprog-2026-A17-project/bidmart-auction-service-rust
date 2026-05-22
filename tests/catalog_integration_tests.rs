@@ -4,7 +4,7 @@ use sqlx::AnyPool;
 
 use bidmart_auction_service_rust::client::{CatalogClient, CatalogClientError, ListingSummary};
 use bidmart_auction_service_rust::persistence::repositories::{
-    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::{
     AuctionService, CreateAuctionCommand,
@@ -194,7 +194,11 @@ async fn create_auction_accepts_active_catalog_listing_for_matching_seller() {
     assert_eq!(auction.listing_id, command.listing_id);
     assert_eq!(auction.seller_id, command.seller_id);
     assert_eq!(
-        listing_auction_session_repo.list_all().await.expect("list auctions").len(),
+        listing_auction_session_repo
+            .list_all()
+            .await
+            .expect("list auctions")
+            .len(),
         1
     );
 }

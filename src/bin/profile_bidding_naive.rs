@@ -1,12 +1,12 @@
-/// Standalone binary for profiling the NAIVE (before-optimization) implementation.
-///
-/// Usage:
-///   cargo build --release --bin profile_bidding_naive
-///   samply record ./target/release/profile_bidding_naive
-///
-/// This exercises the naive O(n) linear-scan implementation so samply captures
-/// the CPU hotspot on the linear scan. Compare the flamegraph with
-/// profile_bidding (optimized) to see the improvement.
+//! Standalone binary for profiling the NAIVE (before-optimization) implementation.
+//!
+//! Usage:
+//!   cargo build --release --bin profile_bidding_naive
+//!   samply record ./target/release/profile_bidding_naive
+//!
+//! This exercises the naive O(n) linear-scan implementation so samply captures
+//! the CPU hotspot on the linear scan. Compare the flamegraph with
+//! profile_bidding (optimized) to see the improvement.
 
 fn run_profile(iterations: u64, bids_per_iteration: u64) -> u64 {
     let mut accepted = 0u64;
@@ -70,7 +70,7 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
-    use super::{run_profile, NaiveAuction};
+    use super::{NaiveAuction, run_profile};
 
     #[test]
     fn run_profile_accepts_all_bids() {
@@ -100,6 +100,7 @@ mod tests {
 
 #[derive(Debug, Clone)]
 struct Bid {
+    #[allow(dead_code)]
     bidder_id: String,
     amount_cents: u64,
     #[allow(dead_code)]
@@ -147,12 +148,7 @@ impl NaiveAuction {
         }
     }
 
-    fn place_bid(
-        &mut self,
-        bidder_id: &str,
-        amount_cents: u64,
-        now: u64,
-    ) -> Result<(), String> {
+    fn place_bid(&mut self, bidder_id: &str, amount_cents: u64, now: u64) -> Result<(), String> {
         // String comparison (heap-allocated)
         if self.status != "ACTIVE" && self.status != "EXTENDED" {
             return Err(format!("not active: {}", self.status));

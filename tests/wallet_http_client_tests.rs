@@ -34,15 +34,15 @@ async fn serve_wallet_release_response(status: StatusCode) -> String {
         .route(
             "/api/v1/wallet/release",
             post({
-                let status = status;
-                move || async move { status }
+                let release_status = status;
+                move || async move { release_status }
             }),
         )
         .route(
             "/api/v1/wallet/convert",
             post({
-                let status = status;
-                move || async move { status }
+                let convert_status = status;
+                move || async move { convert_status }
             }),
         );
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -156,11 +156,8 @@ async fn http_wallet_client_posts_hold_request_to_wallet_api() {
 
 #[tokio::test]
 async fn http_wallet_client_reports_insufficient_balance() {
-    let base_url = serve_wallet_response(
-        StatusCode::BAD_REQUEST,
-        json!("INSUFFICIENT_BALANCE"),
-    )
-    .await;
+    let base_url =
+        serve_wallet_response(StatusCode::BAD_REQUEST, json!("INSUFFICIENT_BALANCE")).await;
     let client = HttpWalletClient::new(base_url).expect("create wallet client");
 
     let error = client
@@ -248,5 +245,8 @@ async fn grpc_wallet_client_returns_network_error_when_unavailable() {
     .await
     .expect("timeout");
 
-    assert!(matches!(result.unwrap_err(), WalletClientError::NetworkError(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        WalletClientError::NetworkError(_)
+    ));
 }

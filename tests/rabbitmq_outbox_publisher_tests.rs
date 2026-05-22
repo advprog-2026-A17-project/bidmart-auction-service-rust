@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bidmart_auction_service_rust::persistence::models::OutboxEventRecord;
 use bidmart_auction_service_rust::scheduler::rabbitmq_outbox_publisher::{
-    build_event_envelope, event_type_to_routing_key, RabbitMqOutboxPublisher,
+    RabbitMqOutboxPublisher, build_event_envelope, event_type_to_routing_key,
 };
 
 fn sample_event(payload: &str) -> OutboxEventRecord {
@@ -20,9 +20,18 @@ fn sample_event(payload: &str) -> OutboxEventRecord {
 
 #[test]
 fn event_type_to_routing_key_maps_known_types() {
-    assert_eq!(event_type_to_routing_key("AuctionCreated"), "auction.created.v1");
-    assert_eq!(event_type_to_routing_key("AuctionEnded"), "auction.ended.v1");
-    assert_eq!(event_type_to_routing_key("BidPlaced"), "auction.bid-placed.v1");
+    assert_eq!(
+        event_type_to_routing_key("AuctionCreated"),
+        "auction.created.v1"
+    );
+    assert_eq!(
+        event_type_to_routing_key("AuctionEnded"),
+        "auction.ended.v1"
+    );
+    assert_eq!(
+        event_type_to_routing_key("BidPlaced"),
+        "auction.bid-placed.v1"
+    );
     assert_eq!(event_type_to_routing_key("Outbid"), "auction.outbid.v1");
     assert_eq!(event_type_to_routing_key("Custom"), "Custom");
 }

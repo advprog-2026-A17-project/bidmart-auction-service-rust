@@ -1,7 +1,7 @@
 //! Tests for OutboxScheduler types and HttpOutboxPublisher error paths.
 
-use bidmart_auction_service_rust::scheduler::outbox_scheduler::*;
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::*;
+use bidmart_auction_service_rust::scheduler::outbox_scheduler::*;
 
 // ============================
 // OutboxPublishError

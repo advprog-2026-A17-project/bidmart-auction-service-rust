@@ -22,17 +22,26 @@ fn event(event_type: &str, payload: &str) -> OutboxEventRecord {
 
 #[test]
 fn routing_key_auction_created() {
-    assert_eq!(event_type_to_routing_key("AuctionCreated"), "auction.created.v1");
+    assert_eq!(
+        event_type_to_routing_key("AuctionCreated"),
+        "auction.created.v1"
+    );
 }
 
 #[test]
 fn routing_key_auction_ended() {
-    assert_eq!(event_type_to_routing_key("AuctionEnded"), "auction.ended.v1");
+    assert_eq!(
+        event_type_to_routing_key("AuctionEnded"),
+        "auction.ended.v1"
+    );
 }
 
 #[test]
 fn routing_key_bid_placed() {
-    assert_eq!(event_type_to_routing_key("BidPlaced"), "auction.bid-placed.v1");
+    assert_eq!(
+        event_type_to_routing_key("BidPlaced"),
+        "auction.bid-placed.v1"
+    );
 }
 
 #[test]
@@ -137,5 +146,8 @@ fn envelope_handles_nested_json_payload() {
     let e = event("BidPlaced", payload);
     let body = build_event_envelope(&e, "auction.bid-placed.v1").unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["payload"]["auction"]["bids"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        json["payload"]["auction"]["bids"].as_array().unwrap().len(),
+        2
+    );
 }

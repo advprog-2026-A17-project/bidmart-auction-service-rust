@@ -2,10 +2,10 @@ use sqlx::AnyPool;
 use uuid::Uuid;
 
 use bidmart_auction_service_rust::persistence::models::{
-    NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
+    NewBidRecord, NewListingAuctionSessionRecord, NewOutboxEventRecord,
 };
 use bidmart_auction_service_rust::persistence::repositories::{
-    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
 };
 
 async fn setup_test_db() -> AnyPool {

@@ -43,20 +43,20 @@ impl RabbitMqOutboxPublisher {
         // Fast path: reuse existing open channel.
         {
             let guard = self.state.read().await;
-            if let Some(st) = guard.as_ref() {
-                if st.channel.status().connected() {
-                    return Ok(st.channel.clone());
-                }
+            if let Some(st) = guard.as_ref()
+                && st.channel.status().connected()
+            {
+                return Ok(st.channel.clone());
             }
         }
 
         // Slow path: (re-)connect.
         let mut guard = self.state.write().await;
         // Double-check after acquiring write lock.
-        if let Some(st) = guard.as_ref() {
-            if st.channel.status().connected() {
-                return Ok(st.channel.clone());
-            }
+        if let Some(st) = guard.as_ref()
+            && st.channel.status().connected()
+        {
+            return Ok(st.channel.clone());
         }
 
         let conn = Connection::connect(&self.amqp_url, ConnectionProperties::default())
@@ -149,4 +149,3 @@ pub fn build_event_envelope(
     serde_json::to_vec(&envelope)
         .map_err(|e| OutboxPublishError::new(format!("JSON serialize: {e}")))
 }
-

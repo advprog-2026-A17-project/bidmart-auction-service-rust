@@ -117,10 +117,65 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     for statement in sql.split(';') {
         let trimmed = statement.trim();
-        if !trimmed.is_empty() {
-            sqlx::query(trimmed).execute(pool).await?;
+        if !trimmed.is_empty()
+            && let Err(error) = sqlx::query(trimmed).execute(pool).await
+            && !is_deferred_additive_schema_error(trimmed, &error)
+        {
+            return Err(error);
         }
     }
 
+    ensure_additive_runtime_schema(pool).await?;
+
     Ok(())
+}
+
+async fn ensure_additive_runtime_schema(pool: &AnyPool) -> Result<(), sqlx::Error> {
+    for statement in [
+        "ALTER TABLE outbox_events ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE outbox_events ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE outbox_events ADD COLUMN locked_until INTEGER",
+        "ALTER TABLE outbox_events ADD COLUMN locked_by TEXT",
+        "ALTER TABLE outbox_events ADD COLUMN last_error TEXT",
+    ] {
+        if let Err(error) = sqlx::query(statement).execute(pool).await
+            && !is_duplicate_column_error(&error)
+        {
+            return Err(error);
+        }
+    }
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS outbox_events_claim_idx ON outbox_events(published, next_attempt_at, locked_until, created_at)",
+        "CREATE TABLE IF NOT EXISTS auction_closure_jobs (
+            auction_id TEXT PRIMARY KEY,
+            due_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            locked_until INTEGER,
+            locked_by TEXT,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS auction_closure_jobs_due_idx ON auction_closure_jobs(status, due_at, locked_until)",
+    ] {
+        sqlx::query(statement).execute(pool).await?;
+    }
+
+    Ok(())
+}
+
+fn is_duplicate_column_error(error: &sqlx::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("duplicate column")
+        || message.contains("already exists")
+        || message.contains("duplicate_column")
+}
+
+fn is_deferred_additive_schema_error(statement: &str, error: &sqlx::Error) -> bool {
+    let normalized_statement = statement.to_ascii_lowercase();
+    let message = error.to_string().to_ascii_lowercase();
+    normalized_statement.contains("outbox_events_claim_idx")
+        && (message.contains("next_attempt_at") || message.contains("locked_until"))
 }

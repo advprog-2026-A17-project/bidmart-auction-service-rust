@@ -252,6 +252,7 @@ pub struct ListingAuctionSession {
 }
 
 impl ListingAuctionSession {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
         listing_id: impl Into<String>,
@@ -277,6 +278,7 @@ impl ListingAuctionSession {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_status(
         id: impl Into<String>,
         listing_id: impl Into<String>,
@@ -383,10 +385,10 @@ impl ListingAuctionSession {
             return Err(BidError::SelfBiddingNotAllowed { bidder_id });
         }
 
-        if let Some(current) = &self.current_highest {
-            if current.bidder_id == bidder_id {
-                return Err(BidError::SelfBiddingNotAllowed { bidder_id });
-            }
+        if let Some(current) = &self.current_highest
+            && current.bidder_id == bidder_id
+        {
+            return Err(BidError::SelfBiddingNotAllowed { bidder_id });
         }
 
         let minimum_required = self.minimum_required_bid();
@@ -426,21 +428,21 @@ impl ListingAuctionSession {
             return Err(BidError::SelfBiddingNotAllowed { bidder_id });
         }
 
-        if let Some(current) = &self.current_highest {
-            if current.bidder_id == bidder_id {
-                if max_amount < current.amount {
-                    return Err(BidError::BidTooLow {
-                        minimum: current.amount,
-                    });
-                }
-
-                return Ok(BidAccepted {
-                    new_highest: current.clone(),
-                    previous_highest: Some(current.clone()),
-                    extended: false,
-                    new_end_at: self.end_at,
+        if let Some(current) = &self.current_highest
+            && current.bidder_id == bidder_id
+        {
+            if max_amount < current.amount {
+                return Err(BidError::BidTooLow {
+                    minimum: current.amount,
                 });
             }
+
+            return Ok(BidAccepted {
+                new_highest: current.clone(),
+                previous_highest: Some(current.clone()),
+                extended: false,
+                new_end_at: self.end_at,
+            });
         }
 
         let minimum_required = self.minimum_required_bid();

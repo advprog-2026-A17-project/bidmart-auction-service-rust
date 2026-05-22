@@ -74,8 +74,11 @@ async fn http_catalog_client_fetches_listing_summary_from_catalogue_api() {
 
 #[tokio::test]
 async fn http_catalog_client_returns_not_found_error() {
-    let base_url =
-        serve_response(StatusCode::NOT_FOUND, json!({"message": "listing not found"})).await;
+    let base_url = serve_response(
+        StatusCode::NOT_FOUND,
+        json!({"message": "listing not found"}),
+    )
+    .await;
     let client = HttpCatalogClient::new(base_url).expect("create client");
 
     let error = client
@@ -88,8 +91,11 @@ async fn http_catalog_client_returns_not_found_error() {
 
 #[tokio::test]
 async fn http_catalog_client_returns_service_error() {
-    let base_url =
-        serve_response(StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "boom"})).await;
+    let base_url = serve_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json!({"message": "boom"}),
+    )
+    .await;
     let client = HttpCatalogClient::new(base_url).expect("create client");
 
     let error = client
@@ -141,5 +147,8 @@ async fn grpc_catalog_client_returns_network_error_when_unavailable() {
     .await
     .expect("timeout");
 
-    assert!(matches!(result.unwrap_err(), CatalogClientError::NetworkError(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        CatalogClientError::NetworkError(_)
+    ));
 }

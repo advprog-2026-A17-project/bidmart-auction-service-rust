@@ -198,9 +198,10 @@ impl HttpServiceClient {
                     HttpServiceClientError::Configuration(error.to_string())
                 })?
         } else {
-            path.parse::<Uri>().map_err(|error: hyper::http::uri::InvalidUri| {
-                HttpServiceClientError::Configuration(error.to_string())
-            })?
+            path.parse::<Uri>()
+                .map_err(|error: hyper::http::uri::InvalidUri| {
+                    HttpServiceClientError::Configuration(error.to_string())
+                })?
         };
 
         let content_length = body.len().to_string();

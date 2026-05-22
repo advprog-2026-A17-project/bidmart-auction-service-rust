@@ -1,5 +1,5 @@
-use crate::listing_auction_session::{ListingAuctionSessionStatus, BidError, Money, UserId};
-use crate::persistence::models::{ListingAuctionSessionRecord, BidRecord};
+use crate::listing_auction_session::{BidError, ListingAuctionSessionStatus, Money, UserId};
+use crate::persistence::models::{BidRecord, ListingAuctionSessionRecord};
 
 pub struct TimeBidPolicy;
 pub struct IdentityBidPolicy;
@@ -9,13 +9,17 @@ pub struct WalletBidPolicy;
 impl TimeBidPolicy {
     pub fn validate(auction: &ListingAuctionSessionRecord, bid_time: i64) -> Result<(), BidError> {
         let status = map_status(&auction.status);
-        if status != ListingAuctionSessionStatus::Active && status != ListingAuctionSessionStatus::Extended {
+        if status != ListingAuctionSessionStatus::Active
+            && status != ListingAuctionSessionStatus::Extended
+        {
             return Err(BidError::AuctionNotActive { status });
         }
 
         if bid_time < auction.start_time {
             return Err(BidError::AuctionNotStarted {
-                start_at: crate::listing_auction_session::UnixSeconds::new(auction.start_time as u64),
+                start_at: crate::listing_auction_session::UnixSeconds::new(
+                    auction.start_time as u64,
+                ),
             });
         }
 

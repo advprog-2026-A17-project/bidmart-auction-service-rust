@@ -1,4 +1,15 @@
+pub mod auction_application;
+pub mod auction_bid_lock;
+pub mod auction_closure_use_case;
+pub mod auction_commands;
+pub mod auction_core;
+pub mod auction_create;
+pub mod auction_event_publisher;
+pub mod auction_queries;
 pub mod auction_service;
 pub mod auction_strategy;
+pub mod auction_types;
 pub mod bid_policies;
+pub mod bid_validation_chain;
 pub mod close_strategy;
+pub mod closure_workflow;

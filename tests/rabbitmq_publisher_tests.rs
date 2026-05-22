@@ -2,7 +2,7 @@
 
 use bidmart_auction_service_rust::persistence::models::OutboxEventRecord;
 use bidmart_auction_service_rust::scheduler::rabbitmq_outbox_publisher::{
-    build_event_envelope, event_type_to_routing_key, RabbitMqOutboxPublisher,
+    RabbitMqOutboxPublisher, build_event_envelope, event_type_to_routing_key,
 };
 
 fn sample_event(event_type: &str, payload: &str) -> OutboxEventRecord {
@@ -20,17 +20,26 @@ fn sample_event(event_type: &str, payload: &str) -> OutboxEventRecord {
 
 #[test]
 fn routing_key_auction_created() {
-    assert_eq!(event_type_to_routing_key("AuctionCreated"), "auction.created.v1");
+    assert_eq!(
+        event_type_to_routing_key("AuctionCreated"),
+        "auction.created.v1"
+    );
 }
 
 #[test]
 fn routing_key_auction_ended() {
-    assert_eq!(event_type_to_routing_key("AuctionEnded"), "auction.ended.v1");
+    assert_eq!(
+        event_type_to_routing_key("AuctionEnded"),
+        "auction.ended.v1"
+    );
 }
 
 #[test]
 fn routing_key_bid_placed() {
-    assert_eq!(event_type_to_routing_key("BidPlaced"), "auction.bid-placed.v1");
+    assert_eq!(
+        event_type_to_routing_key("BidPlaced"),
+        "auction.bid-placed.v1"
+    );
 }
 
 #[test]
@@ -79,16 +88,17 @@ fn build_envelope_with_empty_payload() {
 
 #[test]
 fn rabbitmq_publisher_new_creates_instance() {
-    let publisher = RabbitMqOutboxPublisher::new("amqp://guest:guest@localhost:5672/%2f", "bidmart.events");
+    let publisher =
+        RabbitMqOutboxPublisher::new("amqp://guest:guest@localhost:5672/%2f", "bidmart.events");
     let _fn = publisher.publisher_fn();
 }
 
 #[tokio::test]
 async fn rabbitmq_publisher_publish_fails_when_no_connection() {
-    let publisher = RabbitMqOutboxPublisher::new("amqp://guest:guest@localhost:59999/%2f", "test.exchange");
+    let publisher =
+        RabbitMqOutboxPublisher::new("amqp://guest:guest@localhost:59999/%2f", "test.exchange");
     let event = sample_event("BidPlaced", r#"{"test":true}"#);
     let result = publisher.publish(event).await;
     // Should fail because no RabbitMQ server is running on port 59999
     assert!(result.is_err());
 }
-

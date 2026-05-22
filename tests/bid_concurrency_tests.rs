@@ -8,7 +8,7 @@ use bidmart_auction_service_rust::client::{
 };
 use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
@@ -97,7 +97,8 @@ async fn concurrent_bids_on_same_auction_do_not_overwrite_highest_bid_with_stale
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = wallet_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service =
+        wallet_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -218,7 +219,11 @@ async fn proxy_bid_auto_counters_later_standard_bid() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool.clone());
-    let service = wallet_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = wallet_auction_service(
+        listing_auction_session_repo.clone(),
+        bid_repo.clone(),
+        outbox_repo,
+    );
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -318,4 +323,14 @@ async fn concurrent_proxy_bids_across_instances_resolve_deterministically() {
         .expect("winning bid exists");
     assert_eq!(top_bid.bidder_id, "proxy-a");
     assert_eq!(top_bid.bid_amount_cents, 5000);
+
+    let bids = bid_repo
+        .list_by_auction_id_desc(&auction_id)
+        .await
+        .expect("list bids");
+    let proxy_a_rows = bids.iter().filter(|bid| bid.bidder_id == "proxy-a").count();
+    assert_eq!(
+        proxy_a_rows, 1,
+        "proxy auto-counter must update the winning proxy bid instead of inserting self-bid history"
+    );
 }

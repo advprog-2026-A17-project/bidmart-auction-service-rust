@@ -119,6 +119,12 @@ fn per_endpoint_counters_increment_independently() {
     METRICS.auctions_closed.fetch_add(1, Ordering::Relaxed);
 
     assert_eq!(METRICS.bids_placed.load(Ordering::Relaxed) - bids_before, 1);
-    assert_eq!(METRICS.auctions_created.load(Ordering::Relaxed) - created_before, 1);
-    assert_eq!(METRICS.auctions_closed.load(Ordering::Relaxed) - closed_before, 1);
+    assert_eq!(
+        METRICS.auctions_created.load(Ordering::Relaxed) - created_before,
+        1
+    );
+    assert_eq!(
+        METRICS.auctions_closed.load(Ordering::Relaxed) - closed_before,
+        1
+    );
 }

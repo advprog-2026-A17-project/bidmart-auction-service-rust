@@ -17,8 +17,10 @@ const SEQUENTIAL_ITERS: usize = 1000;
 
 #[derive(Debug, Clone)]
 struct NaiveBid {
+    #[allow(dead_code)]
     bidder_id: String,
     amount_cents: u64,
+    #[allow(dead_code)]
     placed_at: u64,
 }
 
@@ -74,11 +76,7 @@ impl NaiveAuction {
             return Err("self bid".to_string());
         }
 
-        let current_highest = self
-            .bids
-            .iter()
-            .cloned()
-            .max_by_key(|b| b.amount_cents);
+        let current_highest = self.bids.iter().cloned().max_by_key(|b| b.amount_cents);
 
         let minimum = match &current_highest {
             Some(bid) => bid.amount_cents + self.minimum_increment_cents,
@@ -117,7 +115,8 @@ impl NaiveAuction {
 fn bench_naive_sequential() -> u128 {
     let start = Instant::now();
     for _ in 0..SEQUENTIAL_ITERS {
-        let mut auction = NaiveAuction::new("seller-1", 10_000, 100, 5_000_000, 1_000_000, 2_000_000);
+        let mut auction =
+            NaiveAuction::new("seller-1", 10_000, 100, 5_000_000, 1_000_000, 2_000_000);
         for i in 0..SEQUENTIAL_BIDS {
             let bidder = if i % 2 == 0 { "bidder-a" } else { "bidder-b" };
             let amount = 10_000 + (i + 1) as u64 * 100;
@@ -184,7 +183,8 @@ fn write_log(naive_us: u128, optimized_us: u128) {
         optimized_us * 1000 / (SEQUENTIAL_BIDS * SEQUENTIAL_ITERS) as u128,
     );
 
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("artifacts/profiling-before-after.log");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("artifacts/profiling-before-after.log");
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -197,6 +197,9 @@ fn write_log(naive_us: u128, optimized_us: u128) {
 fn profile_bidding_comparison_naive_vs_optimized() {
     let naive_us = bench_naive_sequential();
     let optimized_us = bench_optimized_sequential();
-    assert!(optimized_us < naive_us, "optimized should be faster than naive");
+    assert!(
+        optimized_us < naive_us,
+        "optimized should be faster than naive"
+    );
     write_log(naive_us, optimized_us);
 }

@@ -6,7 +6,6 @@
 ///
 /// This exercises the critical bidding hot-path (domain layer) in a tight
 /// loop so that samply can capture meaningful CPU samples.
-
 use bidmart_auction_service_rust::listing_auction_session::{
     ListingAuctionSession, ListingAuctionSessionStatus, Money, UnixSeconds, UserId,
 };

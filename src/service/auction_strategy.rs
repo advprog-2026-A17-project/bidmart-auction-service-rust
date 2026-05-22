@@ -72,6 +72,44 @@ pub fn resolve_strategy(auction_type: AuctionType) -> Box<dyn AuctionStrategy> {
     AuctionStrategyRegistry::default_registry().resolve(auction_type)
 }
 
+pub trait AuctionWorkflow: Send + Sync {
+    fn validate_create_request(&self) -> Result<(), CreateAuctionError>;
+}
+
+pub struct AuctionWorkflowFactory;
+
+impl AuctionWorkflowFactory {
+    pub fn create(auction_type: AuctionType) -> Box<dyn AuctionWorkflow> {
+        match auction_type {
+            AuctionType::English => Box::new(EnglishAuctionWorkflow),
+            AuctionType::Scholarship => Box::new(DisabledAuctionWorkflow { auction_type }),
+            AuctionType::MultiSlotRegional => Box::new(DisabledAuctionWorkflow { auction_type }),
+            AuctionType::Enterprise => Box::new(DisabledAuctionWorkflow { auction_type }),
+        }
+    }
+}
+
+struct EnglishAuctionWorkflow;
+
+impl AuctionWorkflow for EnglishAuctionWorkflow {
+    fn validate_create_request(&self) -> Result<(), CreateAuctionError> {
+        Ok(())
+    }
+}
+
+struct DisabledAuctionWorkflow {
+    auction_type: AuctionType,
+}
+
+impl AuctionWorkflow for DisabledAuctionWorkflow {
+    fn validate_create_request(&self) -> Result<(), CreateAuctionError> {
+        Err(CreateAuctionError::InvalidInput(format!(
+            "Auction type {} is recognized but not enabled yet",
+            self.auction_type.as_storage_value()
+        )))
+    }
+}
+
 fn english_strategy_factory() -> Box<dyn AuctionStrategy> {
     Box::new(EnglishAuctionStrategy)
 }

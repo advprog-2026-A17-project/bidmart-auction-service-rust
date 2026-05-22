@@ -495,12 +495,12 @@ fn apply_trusted_user_id(
         return Ok(());
     };
 
-    if let Some(body_user_id) = request_user_id.as_deref().filter(|value| !value.is_empty()) {
-        if body_user_id != trusted_user_id {
-            return Err(ApiError::forbidden(format!(
-                "{field_name} does not match authenticated user"
-            )));
-        }
+    if let Some(body_user_id) = request_user_id.as_deref().filter(|value| !value.is_empty())
+        && body_user_id != trusted_user_id
+    {
+        return Err(ApiError::forbidden(format!(
+            "{field_name} does not match authenticated user"
+        )));
     }
 
     *request_user_id = Some(trusted_user_id);

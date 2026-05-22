@@ -27,9 +27,12 @@ impl OutboxScheduler {
         F: FnMut(OutboxEventRecord) -> Fut,
         Fut: Future<Output = Result<(), OutboxPublishError>>,
     {
+        let now = chrono::Utc::now().timestamp();
+        let worker_id = worker_id("outbox");
+        let lock_until = now + 60;
         let events = self
             .outbox_repo
-            .list_pending(limit)
+            .claim_pending(limit, now, lock_until, &worker_id)
             .await
             .map_err(|error| OutboxSchedulerError::DatabaseError(error.to_string()))?;
 
@@ -49,7 +52,13 @@ impl OutboxScheduler {
                         .map_err(|error| OutboxSchedulerError::DatabaseError(error.to_string()))?;
                     report.published += 1;
                 }
-                Err(_) => {
+                Err(error) => {
+                    let now = chrono::Utc::now().timestamp();
+                    let next_attempt_at = now + retry_delay_seconds(report.failed + 1);
+                    self.outbox_repo
+                        .mark_publish_failed(&event.id, now, next_attempt_at, &error.to_string())
+                        .await
+                        .map_err(|error| OutboxSchedulerError::DatabaseError(error.to_string()))?;
                     report.failed += 1;
                 }
             }
@@ -75,10 +84,32 @@ impl OutboxScheduler {
 
             loop {
                 ticker.tick().await;
+                sleep_jitter().await;
                 let publish = publish.clone();
                 let _ = scheduler.publish_pending(limit, publish).await;
             }
         })
+    }
+}
+
+fn retry_delay_seconds(failure_index: usize) -> i64 {
+    let exponent = failure_index.saturating_sub(1).min(6) as u32;
+    2_i64.pow(exponent).min(60)
+}
+
+fn worker_id(prefix: &str) -> String {
+    format!("{prefix}-{}", std::process::id())
+}
+
+async fn sleep_jitter() {
+    let jitter_ms = crate::config::resolve_scheduler_jitter_ms();
+    if jitter_ms == 0 {
+        return;
+    }
+    let now = chrono::Utc::now().timestamp_subsec_millis() as u64;
+    let delay = now % jitter_ms;
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(delay)).await;
     }
 }
 

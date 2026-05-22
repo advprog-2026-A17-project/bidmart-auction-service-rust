@@ -70,6 +70,12 @@ impl MockWalletClient {
     }
 }
 
+impl Default for MockWalletClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl WalletClient for MockWalletClient {
     async fn hold_funds(

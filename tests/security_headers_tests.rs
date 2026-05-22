@@ -7,9 +7,8 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn responses_contain_security_headers() {
     // We test the /metrics endpoint since it requires no database setup
-    let router = bidmart_auction_service_rust::http::router::create_router(
-        create_test_service().await,
-    );
+    let router =
+        bidmart_auction_service_rust::http::router::create_router(create_test_service().await);
 
     let request = axum::http::Request::builder()
         .uri("/metrics")
@@ -22,7 +21,11 @@ async fn responses_contain_security_headers() {
 
     let headers = response.headers();
     assert_eq!(
-        headers.get("x-content-type-options").unwrap().to_str().unwrap(),
+        headers
+            .get("x-content-type-options")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "nosniff"
     );
     assert_eq!(
@@ -38,15 +41,19 @@ async fn responses_contain_security_headers() {
         "strict-origin-when-cross-origin"
     );
     assert!(
-        headers.get("cache-control").unwrap().to_str().unwrap().contains("no-store")
+        headers
+            .get("cache-control")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("no-store")
     );
 }
 
 #[tokio::test]
 async fn metrics_endpoint_returns_prometheus_format() {
-    let router = bidmart_auction_service_rust::http::router::create_router(
-        create_test_service().await,
-    );
+    let router =
+        bidmart_auction_service_rust::http::router::create_router(create_test_service().await);
 
     let request = axum::http::Request::builder()
         .uri("/metrics")
@@ -83,9 +90,10 @@ async fn metrics_endpoint_returns_prometheus_format() {
 }
 
 /// Helper: create a minimal AuctionService backed by an in-memory SQLite database.
-async fn create_test_service() -> bidmart_auction_service_rust::service::auction_service::AuctionService {
+async fn create_test_service()
+-> bidmart_auction_service_rust::service::auction_service::AuctionService {
     use bidmart_auction_service_rust::persistence::repositories::{
-        ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+        BidRepository, ListingAuctionSessionRepository, OutboxRepository,
     };
 
     let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")

@@ -1,9 +1,9 @@
 use bidmart_auction_service_rust::listing_auction_session::{
-    Bid, ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStatus, Money, UnixSeconds,
-    UserId,
+    Bid, ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStatus, Money,
+    UnixSeconds, UserId,
 };
 use bidmart_auction_service_rust::service::close_strategy::{
-    default_close_strategy, CloseStrategy, EnglishReserveClose,
+    CloseStrategy, EnglishReserveClose, default_close_strategy,
 };
 
 fn active_session_with_bid(bid_cents: u64) -> ListingAuctionSession {

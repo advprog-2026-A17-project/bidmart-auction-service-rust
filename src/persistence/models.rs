@@ -85,6 +85,19 @@ pub struct NewOutboxEventRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuctionClosureJobRecord {
+    pub auction_id: String,
+    pub due_at: i64,
+    pub status: String,
+    pub attempts: i64,
+    pub locked_until: Option<i64>,
+    pub locked_by: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 fn optional_i64(row: &AnyRow, column: &str) -> Result<Option<i64>, sqlx::Error> {
     match row.try_get(column) {
         Ok(value) => Ok(Some(value)),
@@ -182,6 +195,22 @@ impl<'r> FromRow<'r, AnyRow> for ProxyBidRecord {
                 .or_else(|_| row.try_get("listing_id"))?,
             bidder_id: row.try_get("bidder_id")?,
             max_bid_amount_cents: row.try_get("max_bid_amount_cents")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, AnyRow> for AuctionClosureJobRecord {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            auction_id: row.try_get("auction_id")?,
+            due_at: row.try_get("due_at")?,
+            status: row.try_get("status")?,
+            attempts: row.try_get("attempts")?,
+            locked_until: optional_i64(row, "locked_until")?,
+            locked_by: optional_string(row, "locked_by")?,
+            last_error: optional_string(row, "last_error")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

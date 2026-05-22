@@ -49,8 +49,30 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     payload TEXT NOT NULL,
     published BOOLEAN NOT NULL,
     published_at INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER,
+    locked_by TEXT,
+    last_error TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS outbox_events_published_idx ON outbox_events(published, created_at);
+CREATE INDEX IF NOT EXISTS outbox_events_claim_idx ON outbox_events(published, next_attempt_at, locked_until, created_at);
+
+CREATE TABLE IF NOT EXISTS auction_closure_jobs (
+    auction_id TEXT PRIMARY KEY,
+    due_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER,
+    locked_by TEXT,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (auction_id) REFERENCES listings(id)
+);
+
+CREATE INDEX IF NOT EXISTS auction_closure_jobs_due_idx
+    ON auction_closure_jobs(status, due_at, locked_until);

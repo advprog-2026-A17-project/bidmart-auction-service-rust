@@ -2,7 +2,7 @@ use sqlx::AnyPool;
 
 use bidmart_auction_service_rust::persistence::models::NewListingAuctionSessionRecord;
 use bidmart_auction_service_rust::persistence::repositories::{
-    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
+    BidRepository, ListingAuctionSessionRepository, OutboxRepository,
 };
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::AuctionClosureScheduler;
 use bidmart_auction_service_rust::service::auction_service::AuctionService;

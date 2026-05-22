@@ -3,7 +3,9 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
-use crate::service::auction_service::{AuctionService, CloseListingAuctionSessionError, ListPendingClosureError};
+use crate::service::auction_service::{
+    AuctionService, CloseListingAuctionSessionError, ListPendingClosureError,
+};
 
 #[derive(Debug, Clone)]
 pub struct AuctionClosureScheduler {
@@ -15,14 +17,17 @@ impl AuctionClosureScheduler {
         Self { auction_service }
     }
 
-    pub async fn close_pending(&self) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
+    pub async fn close_pending(
+        &self,
+    ) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
         let mut report = AuctionClosureReport {
             attempted: 0,
             closed: 0,
             failed: 0,
         };
+        let limit = crate::config::resolve_auction_closure_batch_size() as usize;
 
-        loop {
+        while report.attempted < limit {
             match self.auction_service.process_one_pending_closure().await {
                 Ok(Some(_)) => {
                     report.attempted += 1;
@@ -50,9 +55,22 @@ impl AuctionClosureScheduler {
 
             loop {
                 ticker.tick().await;
+                sleep_jitter().await;
                 let _ = scheduler.close_pending().await;
             }
         })
+    }
+}
+
+async fn sleep_jitter() {
+    let jitter_ms = crate::config::resolve_scheduler_jitter_ms();
+    if jitter_ms == 0 {
+        return;
+    }
+    let now = chrono::Utc::now().timestamp_subsec_millis() as u64;
+    let delay = now % jitter_ms;
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(delay)).await;
     }
 }
 
@@ -70,4 +88,3 @@ pub enum AuctionClosureSchedulerError {
     #[error("Close auction error: {0}")]
     CloseAuction(#[from] CloseListingAuctionSessionError),
 }
-

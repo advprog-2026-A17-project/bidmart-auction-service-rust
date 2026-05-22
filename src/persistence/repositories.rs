@@ -1,8 +1,8 @@
 use sqlx::AnyPool;
 
 use crate::persistence::models::{
-    BidRecord, ListingAuctionSessionRecord, NewBidRecord, NewListingAuctionSessionRecord,
-    NewOutboxEventRecord, OutboxEventRecord, ProxyBidRecord,
+    AuctionClosureJobRecord, BidRecord, ListingAuctionSessionRecord, NewBidRecord,
+    NewListingAuctionSessionRecord, NewOutboxEventRecord, OutboxEventRecord, ProxyBidRecord,
 };
 
 #[derive(Debug, Clone)]
@@ -483,13 +483,95 @@ impl OutboxRepository {
         .await
     }
 
+    pub async fn claim_pending(
+        &self,
+        limit: i64,
+        now: i64,
+        lock_until: i64,
+        worker_id: &str,
+    ) -> Result<Vec<OutboxEventRecord>, sqlx::Error> {
+        let use_postgres_claim = {
+            let conn = self.pool.acquire().await?;
+            conn.backend_name() != "SQLite"
+        };
+
+        if use_postgres_claim {
+            return sqlx::query_as::<_, OutboxEventRecord>(
+                "WITH candidate AS ( \
+                    SELECT id \
+                    FROM outbox_events \
+                    WHERE published = $1 \
+                      AND next_attempt_at <= $2 \
+                      AND (locked_until IS NULL OR locked_until <= $2) \
+                    ORDER BY created_at ASC \
+                    LIMIT $3 \
+                    FOR UPDATE SKIP LOCKED \
+                 ) \
+                 UPDATE outbox_events \
+                 SET locked_until = $4, locked_by = $5, updated_at = $2 \
+                 WHERE id IN (SELECT id FROM candidate) \
+                 RETURNING id, aggregate_id, event_type, payload, CASE WHEN published THEN 1 ELSE 0 END AS published, \
+                 published_at, created_at, updated_at",
+            )
+            .bind(false)
+            .bind(now)
+            .bind(limit)
+            .bind(lock_until)
+            .bind(worker_id)
+            .fetch_all(&self.pool)
+            .await;
+        }
+
+        let candidates = sqlx::query_as::<_, OutboxEventRecord>(
+            "SELECT id, aggregate_id, event_type, payload, CASE WHEN published THEN 1 ELSE 0 END AS published, \
+             published_at, created_at, updated_at \
+             FROM outbox_events \
+             WHERE published = $1 \
+               AND next_attempt_at <= $2 \
+               AND (locked_until IS NULL OR locked_until <= $2) \
+             ORDER BY created_at ASC \
+             LIMIT $3",
+        )
+        .bind(false)
+        .bind(now)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut claimed = Vec::with_capacity(candidates.len());
+        for event in candidates {
+            let result = sqlx::query(
+                "UPDATE outbox_events \
+                 SET locked_until = $1, locked_by = $2, updated_at = $3 \
+                 WHERE id = $4 \
+                   AND published = $5 \
+                   AND (locked_until IS NULL OR locked_until <= $3)",
+            )
+            .bind(lock_until)
+            .bind(worker_id)
+            .bind(now)
+            .bind(&event.id)
+            .bind(false)
+            .execute(&self.pool)
+            .await?;
+
+            if result.rows_affected() == 1 {
+                claimed.push(event);
+            }
+        }
+
+        Ok(claimed)
+    }
+
     pub async fn mark_published(
         &self,
         event_id: &str,
         published_at: i64,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "UPDATE outbox_events SET published = $1, published_at = $2, updated_at = $3 WHERE id = $4",
+            "UPDATE outbox_events \
+             SET published = $1, published_at = $2, updated_at = $3, locked_until = NULL, locked_by = NULL, last_error = NULL \
+             WHERE id = $4",
         )
         .bind(true)
         .bind(published_at)
@@ -498,5 +580,225 @@ impl OutboxRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn mark_publish_failed(
+        &self,
+        event_id: &str,
+        now: i64,
+        next_attempt_at: i64,
+        error: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE outbox_events \
+             SET attempts = attempts + 1, next_attempt_at = $1, locked_until = NULL, locked_by = NULL, last_error = $2, updated_at = $3 \
+             WHERE id = $4",
+        )
+        .bind(next_attempt_at)
+        .bind(error)
+        .bind(now)
+        .bind(event_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AuctionClosureJobRepository {
+    pool: AnyPool,
+}
+
+impl AuctionClosureJobRepository {
+    pub fn new(pool: AnyPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn upsert_pending(
+        &self,
+        auction_id: &str,
+        due_at: i64,
+        now: i64,
+    ) -> Result<AuctionClosureJobRecord, sqlx::Error> {
+        sqlx::query_as::<_, AuctionClosureJobRecord>(
+            "INSERT INTO auction_closure_jobs \
+             (auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at) \
+             VALUES ($1, $2, 'PENDING', 0, NULL, NULL, NULL, $3, $3) \
+             ON CONFLICT (auction_id) DO UPDATE \
+             SET due_at = excluded.due_at, \
+                 status = CASE WHEN auction_closure_jobs.status IN ('DONE', 'SETTLING') THEN auction_closure_jobs.status ELSE 'PENDING' END, \
+                 locked_until = NULL, locked_by = NULL, updated_at = excluded.updated_at \
+             RETURNING auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at",
+        )
+        .bind(auction_id)
+        .bind(due_at)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn claim_due(
+        &self,
+        now: i64,
+        lock_until: i64,
+        worker_id: &str,
+    ) -> Result<Option<AuctionClosureJobRecord>, sqlx::Error> {
+        let use_postgres_claim = {
+            let conn = self.pool.acquire().await?;
+            conn.backend_name() != "SQLite"
+        };
+
+        if use_postgres_claim {
+            return sqlx::query_as::<_, AuctionClosureJobRecord>(
+                "WITH candidate AS ( \
+                    SELECT auction_id \
+                    FROM auction_closure_jobs \
+                    WHERE status IN ('PENDING', 'SETTLING') \
+                      AND due_at <= $1 \
+                      AND (locked_until IS NULL OR locked_until <= $1) \
+                    ORDER BY due_at ASC \
+                    LIMIT 1 \
+                    FOR UPDATE SKIP LOCKED \
+                 ) \
+                 UPDATE auction_closure_jobs \
+                 SET status = 'PROCESSING', locked_until = $2, locked_by = $3, updated_at = $1 \
+                 WHERE auction_id IN (SELECT auction_id FROM candidate) \
+                 RETURNING auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at",
+            )
+            .bind(now)
+            .bind(lock_until)
+            .bind(worker_id)
+            .fetch_optional(&self.pool)
+            .await;
+        }
+
+        let candidate = sqlx::query_as::<_, AuctionClosureJobRecord>(
+            "SELECT auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at \
+             FROM auction_closure_jobs \
+             WHERE status IN ('PENDING', 'SETTLING') \
+               AND due_at <= $1 \
+               AND (locked_until IS NULL OR locked_until <= $1) \
+             ORDER BY due_at ASC \
+             LIMIT 1",
+        )
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(job) = candidate else {
+            return Ok(None);
+        };
+
+        let result = sqlx::query(
+            "UPDATE auction_closure_jobs \
+             SET status = 'PROCESSING', locked_until = $1, locked_by = $2, updated_at = $3 \
+             WHERE auction_id = $4 \
+               AND status IN ('PENDING', 'SETTLING') \
+               AND (locked_until IS NULL OR locked_until <= $3)",
+        )
+        .bind(lock_until)
+        .bind(worker_id)
+        .bind(now)
+        .bind(&job.auction_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 1 {
+            Ok(Some(job))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn mark_done(&self, auction_id: &str, now: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE auction_closure_jobs \
+             SET status = 'DONE', locked_until = NULL, locked_by = NULL, last_error = NULL, updated_at = $1 \
+             WHERE auction_id = $2",
+        )
+        .bind(now)
+        .bind(auction_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_settling(
+        &self,
+        auction_id: &str,
+        due_at: i64,
+        now: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO auction_closure_jobs \
+             (auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at) \
+             VALUES ($1, $2, 'SETTLING', 0, NULL, NULL, NULL, $3, $3) \
+             ON CONFLICT (auction_id) DO UPDATE \
+             SET status = 'SETTLING', due_at = excluded.due_at, locked_until = NULL, locked_by = NULL, last_error = NULL, updated_at = excluded.updated_at",
+        )
+        .bind(auction_id)
+        .bind(due_at)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_failed(
+        &self,
+        auction_id: &str,
+        now: i64,
+        next_attempt_at: i64,
+        error: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE auction_closure_jobs \
+             SET status = 'PENDING', attempts = attempts + 1, due_at = $1, locked_until = NULL, locked_by = NULL, last_error = $2, updated_at = $3 \
+             WHERE auction_id = $4",
+        )
+        .bind(next_attempt_at)
+        .bind(error)
+        .bind(now)
+        .bind(auction_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_settlement_failed(
+        &self,
+        auction_id: &str,
+        now: i64,
+        next_attempt_at: i64,
+        error: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE auction_closure_jobs \
+             SET status = 'SETTLING', attempts = attempts + 1, due_at = $1, locked_until = NULL, locked_by = NULL, last_error = $2, updated_at = $3 \
+             WHERE auction_id = $4",
+        )
+        .bind(next_attempt_at)
+        .bind(error)
+        .bind(now)
+        .bind(auction_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn reconcile_missing_pending_jobs(&self, now: i64) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "INSERT INTO auction_closure_jobs \
+             (auction_id, due_at, status, attempts, locked_until, locked_by, last_error, created_at, updated_at) \
+             SELECT id, end_time, 'PENDING', 0, NULL, NULL, NULL, $1, $1 \
+             FROM listings \
+             WHERE end_time <= $1 \
+               AND lifecycle_state NOT IN ('WON', 'UNSOLD', 'CLOSED', 'CANCELLED') \
+               AND id NOT IN (SELECT auction_id FROM auction_closure_jobs)",
+        )
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 }

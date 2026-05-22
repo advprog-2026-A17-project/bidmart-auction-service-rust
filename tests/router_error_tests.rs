@@ -1,11 +1,11 @@
 use axum::http::StatusCode;
 
 use bidmart_auction_service_rust::http::router::ApiError;
+use bidmart_auction_service_rust::listing_auction_session::{BidError, Money};
 use bidmart_auction_service_rust::service::auction_service::{
     CloseListingAuctionSessionError, CreateAuctionError, GetListingAuctionSessionError,
     ListBidsError, ListListingAuctionSessionsError, ListPendingClosureError, PlaceBidError,
 };
-use bidmart_auction_service_rust::listing_auction_session::{BidError, Money};
 
 // ============================================
 // CreateAuctionError conversions
@@ -30,7 +30,8 @@ fn create_auction_database_error_maps_to_500() {
 
 #[test]
 fn get_auction_db_error_maps_to_500() {
-    let error: ApiError = GetListingAuctionSessionError::DatabaseError("query failed".to_string()).into();
+    let error: ApiError =
+        GetListingAuctionSessionError::DatabaseError("query failed".to_string()).into();
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -79,8 +80,7 @@ fn close_wallet_error_maps_to_402() {
 
 #[test]
 fn close_db_error_maps_to_500() {
-    let error: ApiError =
-        CloseListingAuctionSessionError::DatabaseError("fail".to_string()).into();
+    let error: ApiError = CloseListingAuctionSessionError::DatabaseError("fail".to_string()).into();
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -96,11 +96,10 @@ fn place_bid_not_found_maps_to_404() {
 
 #[test]
 fn place_bid_bid_error_maps_to_400() {
-    let error: ApiError =
-        PlaceBidError::BidError(BidError::BidTooLow {
-            minimum: Money::from_cents(1000),
-        })
-        .into();
+    let error: ApiError = PlaceBidError::BidError(BidError::BidTooLow {
+        minimum: Money::from_cents(1000),
+    })
+    .into();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
 }
 
@@ -112,8 +111,7 @@ fn place_bid_catalog_error_maps_to_400() {
 
 #[test]
 fn place_bid_wallet_error_maps_to_402() {
-    let error: ApiError =
-        PlaceBidError::WalletError("insufficient balance".to_string()).into();
+    let error: ApiError = PlaceBidError::WalletError("insufficient balance".to_string()).into();
     assert_eq!(error.status, StatusCode::PAYMENT_REQUIRED);
 }
 

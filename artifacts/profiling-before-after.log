@@ -1,8 +1,0 @@
-# Profiling before/after (domain layer)
-generated_at: 2026-05-22T00:24:15Z
-workload: 100 bids x 1000 iterations
-naive_total_us: 541529
-optimized_total_us: 18693
-improvement_percent: 96.5
-naive_per_bid_ns: 5415
-optimized_per_bid_ns: 186

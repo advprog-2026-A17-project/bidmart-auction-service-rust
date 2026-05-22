@@ -1,0 +1,345 @@
+openapi: 3.0.3
+info:
+  title: BidMart Auction Service API (Rust)
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/api/v1
+tags:
+  - name: auctions
+  - name: bids
+paths:
+  /listings:
+    get:
+      tags: [auctions]
+      summary: List listing auction sessions
+      responses:
+        "200":
+          description: Auction sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuctionPageResponse"
+    post:
+      tags: [auctions]
+      summary: Create listing auction session
+      description: |
+        Opens a listing auction session (idempotent if already exists).
+        If X-User-Id is present, sellerId in the body must match it.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAuctionRequest"
+      responses:
+        "201":
+          description: Created auction session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuctionResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+  /listings/pending-closure:
+    get:
+      tags: [auctions]
+      summary: List auctions pending closure
+      responses:
+        "200":
+          description: Pending closures
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuctionResponse"
+  /listings/{listingId}:
+    get:
+      tags: [auctions]
+      summary: Get auction session by listing ID
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+      responses:
+        "200":
+          description: Auction session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuctionResponse"
+        "404":
+          description: Not found
+  /listings/{listingId}/close:
+    post:
+      tags: [auctions]
+      summary: Close auction session
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+      responses:
+        "200":
+          description: Closed auction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuctionResponse"
+        "404":
+          description: Not found
+  /listings/{listingId}/bids:
+    get:
+      tags: [bids]
+      summary: List bids
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+      responses:
+        "200":
+          description: Bids
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BidResponse"
+    post:
+      tags: [bids]
+      summary: Place bid
+      description: If X-User-Id is present, bidderId in the body must match it.
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/XUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceBidRequest"
+      responses:
+        "201":
+          description: Bid placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BidResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "402":
+          description: Wallet error
+        "404":
+          description: Auction not found
+  /listings/{listingId}/bids/cursor:
+    get:
+      tags: [bids]
+      summary: List bids with cursor pagination
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BidCursorPageResponse"
+    post:
+      tags: [bids]
+      summary: Place proxy bid
+      description: If X-User-Id is present, bidderId in the body must match it.
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/XUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceProxyBidRequest"
+      responses:
+        "201":
+          description: Proxy bid placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BidResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "402":
+          description: Wallet error
+        "404":
+          description: Auction not found
+components:
+  parameters:
+    ListingId:
+      in: path
+      name: listingId
+      required: true
+      schema:
+        type: string
+    XUserId:
+      in: header
+      name: X-User-Id
+      required: false
+      schema:
+        type: string
+  schemas:
+    CreateAuctionRequest:
+      type: object
+      properties:
+        listingId:
+          type: string
+        sellerId:
+          type: string
+        auctionType:
+          type: string
+        startingPrice:
+          type: number
+          format: double
+        reservePrice:
+          type: number
+          format: double
+        minimumIncrement:
+          type: number
+          format: double
+        startTime:
+          oneOf:
+            - type: integer
+              format: int64
+            - type: string
+              format: date-time
+        endTime:
+          oneOf:
+            - type: integer
+              format: int64
+            - type: string
+              format: date-time
+      required:
+        [listingId, sellerId, auctionType, startingPrice, reservePrice, minimumIncrement, startTime, endTime]
+    PlaceBidRequest:
+      type: object
+      properties:
+        bidderId:
+          type: string
+        bidAmount:
+          type: number
+          format: double
+        bidTime:
+          type: integer
+          format: int64
+          description: Unix seconds; defaults to now
+      required: [bidderId, bidAmount]
+    PlaceProxyBidRequest:
+      type: object
+      properties:
+        bidderId:
+          type: string
+        maxBidAmount:
+          type: number
+          format: double
+        bidTime:
+          type: integer
+          format: int64
+          description: Unix seconds; defaults to now
+      required: [bidderId, maxBidAmount]
+    AuctionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        listingId:
+          type: string
+        sellerId:
+          type: string
+        auctionType:
+          type: string
+        startingPrice:
+          type: number
+          format: double
+        reservePrice:
+          type: number
+          format: double
+        currentHighestBid:
+          type: number
+          format: double
+          nullable: true
+        minimumIncrement:
+          type: number
+          format: double
+        status:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+      additionalProperties: true
+    AuctionPageResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuctionResponse"
+        page:
+          type: integer
+        size:
+          type: integer
+        totalItems:
+          type: integer
+        totalPages:
+          type: integer
+      required: [items, page, size, totalItems, totalPages]
+    BidResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        auctionId:
+          type: string
+        bidderId:
+          type: string
+        bidAmount:
+          type: number
+          format: double
+        bidTime:
+          type: string
+          format: date-time
+      additionalProperties: true
+    BidCursorPageResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BidResponse"
+        nextCursor:
+          type: string
+          nullable: true
+        size:
+          type: integer
+      required: [items, size]
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string

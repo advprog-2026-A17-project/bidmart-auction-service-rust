@@ -1,10 +1,8 @@
 name: Continuous Integration
 
 on:
-  pull_request:
-    branches: ["ci-cd", "staging", "main"]
   push:
-    branches: ["ci-cd", "staging", "main"]
+  pull_request:
 
 jobs:
   test:
@@ -22,7 +20,27 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Tests
-        run: cargo test --locked
+        run: cargo test --locked -- --nocapture 2>&1 | tee test-output.log
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: Coverage Gate (minimum 80%)
+        run: cargo llvm-cov --workspace --all-features --fail-under-lines 80 --summary-only 2>&1 | tee coverage-output.log
+
+      - name: Upload Rust Test Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auction-service-test-log
+          path: test-output.log
+
+      - name: Upload Coverage Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auction-service-coverage-log
+          path: coverage-output.log
 
   sonarcloud:
     name: SonarCloud Code Analysis

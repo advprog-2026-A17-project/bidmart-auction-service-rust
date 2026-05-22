@@ -2,10 +2,10 @@ use sqlx::AnyPool;
 use uuid::Uuid;
 
 use bidmart_auction_service_rust::persistence::models::{
-    NewAuctionRecord, NewBidRecord, NewOutboxEventRecord,
+    NewListingAuctionSessionRecord, NewBidRecord, NewOutboxEventRecord,
 };
 use bidmart_auction_service_rust::persistence::repositories::{
-    AuctionRepository, BidRepository, OutboxRepository,
+    ListingAuctionSessionRepository, BidRepository, OutboxRepository,
 };
 
 async fn setup_test_db() -> AnyPool {
@@ -38,12 +38,12 @@ async fn setup_test_db() -> AnyPool {
 #[tokio::test]
 async fn test_insert_and_find_auction() {
     let pool = setup_test_db().await;
-    let repo = AuctionRepository::new(pool);
+    let repo = ListingAuctionSessionRepository::new(pool);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-1".to_string(),
         seller_id: "seller-1".to_string(),
@@ -71,14 +71,14 @@ async fn test_insert_and_find_auction() {
 #[tokio::test]
 async fn test_insert_and_list_bids() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
     // Create auction first
-    let new_auction = NewAuctionRecord {
+    let new_auction = NewListingAuctionSessionRecord {
         id: auction_id.clone(),
         listing_id: "listing-1".to_string(),
         seller_id: "seller-1".to_string(),
@@ -92,7 +92,7 @@ async fn test_insert_and_list_bids() {
         created_at: now,
         updated_at: now,
     };
-    auction_repo
+    listing_auction_session_repo
         .insert(&new_auction)
         .await
         .expect("insert auction");
@@ -138,14 +138,14 @@ async fn test_insert_and_list_bids() {
 #[tokio::test]
 async fn test_winning_bid_tie_breaks_equal_amount_and_time_by_bid_id() {
     let pool = setup_test_db().await;
-    let auction_repo = AuctionRepository::new(pool.clone());
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
 
-    auction_repo
-        .insert(&NewAuctionRecord {
+    listing_auction_session_repo
+        .insert(&NewListingAuctionSessionRecord {
             id: auction_id.clone(),
             listing_id: "listing-fairness".to_string(),
             seller_id: "seller-1".to_string(),

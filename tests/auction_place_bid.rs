@@ -1,9 +1,9 @@
-use bidmart_auction_service_rust::auction::{
-    Auction, AuctionOutcome, AuctionStateError, AuctionStatus, BidError, Money, UnixSeconds, UserId,
+use bidmart_auction_service_rust::listing_auction_session::{
+    ListingAuctionSession, ListingAuctionSessionOutcome, ListingAuctionSessionStateError, ListingAuctionSessionStatus, BidError, Money, UnixSeconds, UserId,
 };
 
-fn sample_auction(start_at: u64, end_at: u64) -> Auction {
-    Auction::new(
+fn sample_auction(start_at: u64, end_at: u64) -> ListingAuctionSession {
+    ListingAuctionSession::new(
         "auction-1",
         "listing-1",
         "seller-1",
@@ -12,11 +12,10 @@ fn sample_auction(start_at: u64, end_at: u64) -> Auction {
         Money::from_cents(50_00),
         UnixSeconds::new(start_at),
         UnixSeconds::new(end_at),
-        3,
     )
 }
 
-fn activate_auction(auction: &mut Auction, now: u64) {
+fn activate_auction(auction: &mut ListingAuctionSession, now: u64) {
     auction
         .activate(UnixSeconds::new(now))
         .expect("auction should activate");
@@ -35,7 +34,7 @@ fn reject_bid_when_scheduled() {
     assert!(matches!(
         result,
         Err(BidError::AuctionNotActive {
-            status: AuctionStatus::Scheduled
+            status: ListingAuctionSessionStatus::Draft
         })
     ));
 }
@@ -46,7 +45,7 @@ fn reject_activation_before_start() {
 
     let result = auction.activate(UnixSeconds::new(50));
 
-    assert!(matches!(result, Err(AuctionStateError::TooEarly { .. })));
+    assert!(matches!(result, Err(ListingAuctionSessionStateError::TooEarly { .. })));
 }
 
 #[test]
@@ -69,7 +68,7 @@ fn accept_first_bid_at_starting_price() {
         auction.current_highest().unwrap().amount,
         Money::from_cents(10_00)
     );
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -180,12 +179,12 @@ fn extend_auction_when_bid_in_last_two_minutes() {
     assert!(result.extended);
     assert_eq!(result.new_end_at, UnixSeconds::new(370));
     assert_eq!(auction.end_at(), UnixSeconds::new(370));
-    assert_eq!(auction.status(), AuctionStatus::Extended);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Extended);
 }
 
 #[test]
-fn stop_extending_after_extension_cap() {
-    let mut auction = Auction::new(
+fn unlimited_extensions_per_spec() {
+    let mut auction = ListingAuctionSession::new(
         "auction-2",
         "listing-2",
         "seller-2",
@@ -194,10 +193,10 @@ fn stop_extending_after_extension_cap() {
         Money::from_cents(50_00),
         UnixSeconds::new(0),
         UnixSeconds::new(300),
-        1,
     );
     activate_auction(&mut auction, 0);
 
+    // First extension
     let first = auction
         .place_bid(
             UserId::new("user-1"),
@@ -205,21 +204,33 @@ fn stop_extending_after_extension_cap() {
             UnixSeconds::new(250),
         )
         .expect("first bid should extend");
-
     assert!(first.extended);
     assert_eq!(first.new_end_at, UnixSeconds::new(370));
 
+    // Second extension — should also extend (no limit per spec)
     let second = auction
         .place_bid(
             UserId::new("user-2"),
             Money::from_cents(12_00),
             UnixSeconds::new(360),
         )
-        .expect("second bid should be accepted without extension");
+        .expect("second bid should extend too");
+    assert!(second.extended);
+    assert_eq!(second.new_end_at, UnixSeconds::new(480));
 
-    assert!(!second.extended);
-    assert_eq!(second.new_end_at, UnixSeconds::new(370));
-    assert_eq!(auction.end_at(), UnixSeconds::new(370));
+    // Third extension — still no limit
+    let third = auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(14_00),
+            UnixSeconds::new(470),
+        )
+        .expect("third bid should extend too");
+    assert!(third.extended);
+    assert_eq!(third.new_end_at, UnixSeconds::new(590));
+
+    // Verify total extensions tracked
+    assert_eq!(auction.extensions(), 3);
 }
 
 #[test]
@@ -236,7 +247,7 @@ fn reject_bid_when_cancelled() {
     assert!(matches!(
         result,
         Err(BidError::AuctionNotActive {
-            status: AuctionStatus::Cancelled
+            status: ListingAuctionSessionStatus::Cancelled
         })
     ));
 }
@@ -252,20 +263,20 @@ fn reject_bid_after_end_time() {
         UnixSeconds::new(100),
     );
 
-    assert!(matches!(result, Err(BidError::AuctionEnded { .. })));
+    assert!(matches!(result, Err(BidError::AuctionEnded { .. })), "Unexpected result: {:?}", result);
 }
 
 #[test]
-fn scheduled_status_on_creation() {
+fn draft_status_on_creation() {
     let auction = sample_auction(100, 200);
-    assert_eq!(auction.status(), AuctionStatus::Scheduled);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Draft);
 }
 
 #[test]
 fn active_status_after_activation() {
     let mut auction = sample_auction(100, 200);
     activate_auction(&mut auction, 100);
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -281,7 +292,7 @@ fn extended_status_when_bid_in_anti_snipe_window() {
         )
         .expect("bid should be accepted");
 
-    assert_eq!(auction.status(), AuctionStatus::Extended);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Extended);
 }
 
 #[test]
@@ -297,7 +308,7 @@ fn remains_active_when_bid_not_in_anti_snipe_window() {
         )
         .expect("bid should be accepted");
 
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -307,7 +318,7 @@ fn auction_cannot_be_reactivated() {
 
     let result = auction.activate(UnixSeconds::new(150));
     assert!(result.is_ok()); // Activating when already active is OK
-    assert_eq!(auction.status(), AuctionStatus::Active);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Active);
 }
 
 #[test]
@@ -324,7 +335,8 @@ fn determine_won_when_reserve_met_after_end() {
         .expect("bid should be accepted");
 
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Won);
+    assert_eq!(result, ListingAuctionSessionOutcome::Won);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Won);
 }
 
 #[test]
@@ -341,12 +353,60 @@ fn determine_unsold_when_reserve_not_met() {
         .expect("bid should be accepted");
 
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Unsold);
+    assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Unsold);
 }
 
 #[test]
 fn determine_unsold_when_no_bids() {
-    let auction = sample_auction(0, 100);
+    let mut auction = sample_auction(0, 100);
     let result = auction.determine_outcome();
-    assert_eq!(result, AuctionOutcome::Unsold);
+    assert_eq!(result, ListingAuctionSessionOutcome::Unsold);
+    assert_eq!(auction.status(), ListingAuctionSessionStatus::Unsold);
+}
+
+#[test]
+fn proxy_bid_places_minimum_valid_amount() {
+    let mut auction = sample_auction(0, 500);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(10),
+        )
+        .expect("seed bid accepted");
+
+    let result = auction
+        .place_proxy_bid(
+            UserId::new("user-2"),
+            Money::from_cents(20_00),
+            UnixSeconds::new(20),
+        )
+        .expect("proxy bid accepted");
+
+    assert_eq!(result.new_highest.amount, Money::from_cents(12_00));
+}
+
+#[test]
+fn proxy_bid_rejects_when_max_is_below_minimum() {
+    let mut auction = sample_auction(0, 500);
+    activate_auction(&mut auction, 0);
+
+    auction
+        .place_bid(
+            UserId::new("user-1"),
+            Money::from_cents(10_00),
+            UnixSeconds::new(10),
+        )
+        .expect("seed bid accepted");
+
+    let result = auction.place_proxy_bid(
+        UserId::new("user-2"),
+        Money::from_cents(11_00),
+        UnixSeconds::new(20),
+    );
+
+    assert!(matches!(result, Err(BidError::BidTooLow { .. })));
 }

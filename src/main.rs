@@ -2,25 +2,26 @@ use bidmart_auction_service_rust::persistence::repositories::OutboxRepository;
 use bidmart_auction_service_rust::scheduler::auction_closure_scheduler::AuctionClosureScheduler;
 use bidmart_auction_service_rust::scheduler::outbox_scheduler::OutboxScheduler;
 use bidmart_auction_service_rust::scheduler::rabbitmq_outbox_publisher::RabbitMqOutboxPublisher;
+use bidmart_auction_service_rust::config::{
+    resolve_auction_closure_interval_ms, resolve_bind_address, resolve_database_url,
+    resolve_events_exchange, resolve_outbox_interval_ms, resolve_rabbitmq_url,
+};
 use bidmart_auction_service_rust::server::{
-    build_router, connect_pool, default_database_url, run_migrations,
+    build_router, connect_pool, run_migrations,
 };
 use dotenvy::from_path;
-use std::env;
 use std::time::Duration;
 use tokio::net::TcpListener;
 
+#[cfg(not(test))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = from_path(".env");
     let _ = dotenvy::from_path_override("../bidmart-infrastructure/.env");
 
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| default_database_url());
-    let bind_address = env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
-    let scheduler_interval_ms = env::var("AUCTION_CLOSURE_SCHEDULER_INTERVAL_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1000);
+    let database_url = resolve_database_url();
+    let bind_address = resolve_bind_address();
+    let scheduler_interval_ms = resolve_auction_closure_interval_ms();
 
     let pool = connect_pool(&database_url).await?;
     run_migrations(&pool).await?;
@@ -32,14 +33,9 @@ async fn main() -> anyhow::Result<()> {
     let _scheduler_handle = scheduler.spawn_polling(Duration::from_millis(scheduler_interval_ms));
 
     // Outbox scheduler → RabbitMQ (publishes domain events to the notification service)
-    let rabbitmq_url = env::var("RABBITMQ_URL")
-        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string());
-    let exchange =
-        env::var("BIDMART_EVENTS_EXCHANGE").unwrap_or_else(|_| "bidmart.events".to_string());
-    let outbox_interval_ms: u64 = env::var("OUTBOX_SCHEDULER_INTERVAL_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1000);
+    let rabbitmq_url = resolve_rabbitmq_url();
+    let exchange = resolve_events_exchange();
+    let outbox_interval_ms = resolve_outbox_interval_ms();
 
     let outbox_repo = OutboxRepository::new(pool);
     let outbox_scheduler = OutboxScheduler::new(outbox_repo);
@@ -55,3 +51,6 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+fn main() {}

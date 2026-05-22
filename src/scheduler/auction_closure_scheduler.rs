@@ -3,7 +3,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
-use crate::service::auction_service::{AuctionService, CloseAuctionError, ListPendingClosureError};
+use crate::service::auction_service::{AuctionService, CloseListingAuctionSessionError, ListPendingClosureError};
 
 #[derive(Debug, Clone)]
 pub struct AuctionClosureScheduler {
@@ -15,24 +15,27 @@ impl AuctionClosureScheduler {
         Self { auction_service }
     }
 
-    pub async fn close_pending(
-        &self,
-    ) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
-        let auctions = self
-            .auction_service
-            .list_pending_closure()
-            .await
-            .map_err(AuctionClosureSchedulerError::from)?;
+    pub async fn close_pending(&self) -> Result<AuctionClosureReport, AuctionClosureSchedulerError> {
         let mut report = AuctionClosureReport {
-            attempted: auctions.len(),
+            attempted: 0,
             closed: 0,
             failed: 0,
         };
 
-        for auction in auctions {
-            match self.auction_service.close_auction(&auction.id).await {
-                Ok(_) => report.closed += 1,
-                Err(_) => report.failed += 1,
+        loop {
+            match self.auction_service.process_one_pending_closure().await {
+                Ok(Some(_)) => {
+                    report.attempted += 1;
+                    report.closed += 1;
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!(
+                        "auction closure failed (wallet/convert/escrow may need retry): {error}"
+                    );
+                    report.attempted += 1;
+                    report.failed += 1;
+                }
             }
         }
 
@@ -65,5 +68,6 @@ pub enum AuctionClosureSchedulerError {
     #[error("List pending closure error: {0}")]
     ListPendingClosure(#[from] ListPendingClosureError),
     #[error("Close auction error: {0}")]
-    CloseAuction(#[from] CloseAuctionError),
+    CloseAuction(#[from] CloseListingAuctionSessionError),
 }
+

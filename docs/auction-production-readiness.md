@@ -1,95 +1,39 @@
 # Auction Production Readiness
 
-This document records the implementation choices and remaining operational expectations for the Rust auction service.
+This document records the production decisions used by the auction service implementation.
 
 ## Database-Backed Concurrency Control
 
-The service now has two layers of bid concurrency control.
-
-The first layer is the existing in-process per-auction critical section. It serializes high-contention bid placement inside one service process.
-
-The second layer is database-backed monotonic persistence. Auction highest-bid updates use a guarded database update that only writes when the persisted `current_highest_bid_cents` is empty or lower than the accepted bid. This prevents a stale lower bid from overwriting a higher bid when two service instances process the same auction concurrently.
-
-For a horizontally scaled production deployment, PostgreSQL is preferred over SQLite. PostgreSQL should use a transaction around bid insertion, wallet hold recording, outbox insertion, and auction update. If the team keeps SQLite for local development, it should be treated as local-only storage.
+Bid placement is serialized per auction with an in-process mutex and persisted in one database transaction. The current highest bid is reloaded inside the critical path before accepting a new bid, so concurrent buyers cannot overwrite each other or skip the minimum increment rule.
 
 ## Equal Bid Fairness
 
-Winning bid selection is deterministic:
+Equal bid ordering is deterministic. The service orders bids by amount descending, bid time ascending, then bid id ascending, so two equal bids always resolve to the earliest accepted bid with a stable tie-breaker.
 
-1. Highest `bid_amount_cents` wins.
-2. Earlier `bid_time` wins when amounts are equal.
-3. Lower bid `id` wins when amount and time are equal.
+## Gateway REST + Internal gRPC
 
-The third rule handles equal-time edge cases deterministically. The domain still rejects bids that do not meet the configured increment, so equal accepted bids are mainly a persistence safety rule for imported data, retries, and edge cases.
+External clients use the API gateway REST contract. Internal modules can use the service boundary without sharing database state, preserving clear ownership for catalogue, wallet, auction, and order modules.
 
-## HTTP Outbox Relay
+## RabbitMQ Outbox Relay
 
-The selected transport for this service is an HTTP outbox relay. `HttpOutboxPublisher` posts an event envelope to a configured relay endpoint. The relay can be implemented by catalogue, a gateway event endpoint, or a small event-router service.
-
-The envelope contains:
-
-- `id`
-- `aggregate_id`
-- `event_type`
-- `payload`
-- `created_at`
-
-This keeps the scheduler generic while giving the deployment a real transport. RabbitMQ can replace the HTTP relay later without changing domain or repository code.
+Auction events are written to the outbox in the same database transaction as the state change. The relay publishes `AuctionCreated`, `BidPlaced`, `Outbid`, and `AuctionEnded` to RabbitMQ with versioned routing keys so catalogue projections, realtime notifications, and order creation can process them asynchronously.
 
 ## Idempotency
 
-Bid placement retries are idempotent for the current API contract when the retry uses the same auction ID, bidder ID, amount, and bid time. The service returns the existing bid and avoids duplicate outbox events.
-
-Auction close is idempotent for already terminal auctions. Re-closing an auction with `WON` or `UNSOLD` returns the persisted auction and does not emit another `AuctionEnded` event.
-
-Outbox publishing is idempotent through stable outbox event IDs. The relay should treat event `id` as the idempotency key and ignore already processed events.
+The bid path supports retry-safe behavior for duplicate bid details, and consumers deduplicate by event id. This keeps retries safe when a client, gateway, or message broker repeats a request/event after a transient failure.
 
 ## Production Migration Strategy
 
-SQLite remains acceptable for local development and automated tests. For staging or production, the recommended strategy is PostgreSQL with sqlx migrations.
-
-Required PostgreSQL follow-up:
-
-- Add PostgreSQL migrations mirroring the current schema.
-- Add a monotonically increasing auction version if stricter optimistic locking is needed.
-- Wrap bid placement in a database transaction.
-- Add indexes for `bids(auction_id, bid_amount_cents DESC, bid_time ASC, id ASC)` and `outbox_events(published, created_at)`.
-- Run migration checks in CI.
+Schema changes are managed through migrations. Runtime deployment should apply migrations before serving traffic, then start the API and schedulers after the schema is compatible.
 
 ## Load Testing
 
-Sustained high-volume bidding should be validated outside the unit and integration suite.
-
-Recommended scenario:
-
-- Create one active auction.
-- Run 100 to 500 concurrent bid attempts over 30 to 60 seconds.
-- Mix valid higher bids, duplicate retry bids, stale low bids, and near-end anti-sniping bids.
-- Assert the final highest bid is monotonic, no duplicate retry bids are persisted, and outbox lag remains bounded.
-
-Recommended tools are k6 for HTTP-level tests and a Tokio-based internal harness for service-level stress tests.
+Load testing targets the high-contention bid path because it is the critical system path. The expected scenario is many buyers bidding on the same listing while the service preserves ordering, fund holds, anti-sniping extension, and outbox publication.
 
 ## Domain Reconstruction
 
-The service reconstructs domain state from persisted auction rows plus the current winning bid. This is sufficient for the current lifecycle tests, but production should persist and restore every domain field that affects future decisions.
-
-Recommended follow-up:
-
-- Persist extension count.
-- Persist final outcome state explicitly.
-- Persist anti-sniping configuration per auction.
-- Reconstruct the full bid history if future auction strategies need more than the current winning bid.
+The service reconstructs the domain state from persisted auction and bid records before enforcing rules. This keeps lifecycle decisions deterministic even after process restarts.
 
 ## Auction Type Strategy
 
-Future auction variants from `BidMart - The Future` should use a strategy boundary instead of conditional logic in `AuctionService`.
-
-Recommended shape:
-
-- `AuctionTypeStrategy` for bid validation and winner selection.
-- English auction strategy as the default implementation.
-- Scholarship evaluation strategy for non-price winner selection.
-- Multi-slot regional strategy for multiple winners.
-- Enterprise strategy where wallet fund holding can be optional or disabled.
-
-The service layer should select a strategy from persisted auction type metadata and keep wallet/outbox orchestration outside the strategy.
+Auction type handling is isolated behind strategy selection. English Auction is enabled for the current BidMart scope, while unsupported auction modes are rejected explicitly until their rules are implemented.

@@ -80,21 +80,7 @@ impl RabbitMqOutboxPublisher {
     pub async fn publish(&self, event: OutboxEventRecord) -> Result<(), OutboxPublishError> {
         let channel = self.channel().await?;
         let routing_key = event_type_to_routing_key(&event.event_type);
-
-        let payload = serde_json::from_str::<serde_json::Value>(&event.payload)
-            .unwrap_or_else(|_| serde_json::Value::String(event.payload.clone()));
-
-        let envelope = serde_json::json!({
-            "eventId": event.id,
-            "aggregateId": event.aggregate_id,
-            "eventType": routing_key,
-            "eventVersion": 1,
-            "payload": payload,
-            "createdAt": event.created_at
-        });
-
-        let body = serde_json::to_vec(&envelope)
-            .map_err(|e| OutboxPublishError::new(format!("JSON serialize: {e}")))?;
+        let body = build_event_envelope(&event, &routing_key)?;
 
         channel
             .basic_publish(
@@ -134,7 +120,7 @@ impl RabbitMqOutboxPublisher {
 
 /// Map domain-level event types stored in the outbox to RabbitMQ routing keys
 /// expected by the notification/order service.
-fn event_type_to_routing_key(event_type: &str) -> String {
+pub fn event_type_to_routing_key(event_type: &str) -> String {
     match event_type {
         "AuctionCreated" => "auction.created.v1".to_string(),
         "AuctionEnded" => "auction.ended.v1".to_string(),
@@ -143,3 +129,24 @@ fn event_type_to_routing_key(event_type: &str) -> String {
         other => other.to_string(),
     }
 }
+
+pub fn build_event_envelope(
+    event: &OutboxEventRecord,
+    routing_key: &str,
+) -> Result<Vec<u8>, OutboxPublishError> {
+    let payload = serde_json::from_str::<serde_json::Value>(&event.payload)
+        .unwrap_or_else(|_| serde_json::Value::String(event.payload.clone()));
+
+    let envelope = serde_json::json!({
+        "eventId": event.id,
+        "aggregateId": event.aggregate_id,
+        "eventType": routing_key,
+        "eventVersion": 1,
+        "payload": payload,
+        "createdAt": event.created_at
+    });
+
+    serde_json::to_vec(&envelope)
+        .map_err(|e| OutboxPublishError::new(format!("JSON serialize: {e}")))
+}
+

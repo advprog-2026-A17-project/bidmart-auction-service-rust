@@ -2,11 +2,12 @@
 fn api_docs_describe_rust_auction_service_as_http_connected() {
     let router = std::fs::read_to_string("src/http/router.rs").expect("read router");
 
-    assert!(router.contains("/api/v1/auctions"));
-    assert!(router.contains("/api/v1/auctions/pending-closure"));
-    assert!(router.contains("/api/v1/auctions/:auction_id"));
-    assert!(router.contains("/api/v1/auctions/:auction_id/close"));
-    assert!(router.contains("/api/v1/auctions/:auction_id/bids"));
+    assert!(router.contains("/api/v1/listings"));
+    assert!(router.contains("/api/v1/listings/pending-closure"));
+    assert!(router.contains("/api/v1/listings/:listing_id"));
+    assert!(router.contains("/api/v1/listings/:listing_id/close"));
+    assert!(router.contains("/api/v1/listings/:listing_id/bids"));
+    assert!(router.contains("/api/v1/listings/:listing_id/bids/cursor"));
 }
 
 #[test]

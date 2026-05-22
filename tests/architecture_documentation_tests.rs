@@ -8,7 +8,8 @@ fn production_readiness_document_covers_remaining_auction_decisions() {
 
     assert!(document.contains("Database-Backed Concurrency Control"));
     assert!(document.contains("Equal Bid Fairness"));
-    assert!(document.contains("HTTP Outbox Relay"));
+    assert!(document.contains("Gateway REST + Internal gRPC"));
+    assert!(document.contains("RabbitMQ Outbox Relay"));
     assert!(document.contains("Idempotency"));
     assert!(document.contains("Production Migration Strategy"));
     assert!(document.contains("Load Testing"));

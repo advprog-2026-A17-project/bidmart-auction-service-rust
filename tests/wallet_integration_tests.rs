@@ -185,7 +185,7 @@ async fn test_place_bid_holds_funds_from_wallet() {
     assert_eq!(holds.len(), 1);
     assert_eq!(holds[0].user_id, "user-1");
     assert_eq!(holds[0].bid_id, bid.id);
-    assert_eq!(holds[0].amount, 1500);
+    assert_eq!(holds[0].amount, 15); // wallet API uses whole rupiah (1500 cents -> 15)
     let expected_expiry = now + 300 + bidmart_auction_service_rust::config::bid_hold_grace_seconds();
     assert_eq!(
         holds[0].expires_at,
@@ -409,7 +409,7 @@ async fn test_close_won_auction_converts_winning_hold() {
     let escrows = wallet_client.seller_escrows.lock().unwrap();
     assert_eq!(escrows.len(), 1);
     assert_eq!(escrows[0].0, "seller-close");
-    assert_eq!(escrows[0].1, 1700);
+    assert_eq!(escrows[0].1, 17); // wallet API uses whole rupiah (1700 cents -> 17)
 }
 
 #[tokio::test]

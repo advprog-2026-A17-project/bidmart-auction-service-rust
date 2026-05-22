@@ -19,6 +19,8 @@ async fn main() -> anyhow::Result<()> {
     let _ = from_path(".env");
     let _ = dotenvy::from_path_override("../bidmart-infrastructure/.env");
 
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let database_url = resolve_database_url();
     let bind_address = resolve_bind_address();
     let scheduler_interval_ms = resolve_auction_closure_interval_ms();

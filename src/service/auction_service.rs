@@ -149,15 +149,12 @@ impl AuctionService {
         &self,
         command: &CreateAuctionCommand,
     ) -> Result<(), CreateAuctionError> {
-        let Some(listing) = self
+        let listing = self
             .require_active_listing(&command.listing_id)
             .await
-            .map_err(CreateAuctionError::InvalidInput)?
-        else {
-            return Ok(());
-        };
+            .map_err(CreateAuctionError::InvalidInput)?;
 
-        if listing.seller_id != command.seller_id {
+        if !listing.seller_id.is_empty() && listing.seller_id != command.seller_id {
             return Err(CreateAuctionError::InvalidInput(
                 "Listing seller does not match auction seller".to_string(),
             ));
@@ -331,15 +328,6 @@ impl AuctionService {
                         .await
                         .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
                 }
-                let amount = cents_to_rupiah(winner.bid_amount_cents);
-                wallet_client
-                    .credit_seller_escrow(
-                        &auction.seller_id,
-                        amount,
-                        &auction.id,
-                    )
-                    .await
-                    .map_err(|error| CloseListingAuctionSessionError::WalletError(error.to_string()))?;
             } else {
                 for bid in bids {
                     if let Some(hold_id) = &bid.wallet_hold_id {
@@ -792,15 +780,16 @@ impl AuctionService {
             }
         };
 
+        if let (Some(wallet_client), Some(previous_hold_id)) =
+            (&self.wallet_client, current_winning.wallet_hold_id.as_deref())
+        {
+            wallet_client
+                .release_hold(previous_hold_id)
+                .await
+                .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
+        }
+
         if current_winning.bidder_id != top_proxy.bidder_id {
-            if let (Some(wallet_client), Some(previous_hold_id)) =
-                (&self.wallet_client, current_winning.wallet_hold_id.as_deref())
-            {
-                wallet_client
-                    .release_hold(previous_hold_id)
-                    .await
-                    .map_err(|error| PlaceBidError::WalletError(error.to_string()))?;
-            }
             self.publish_outbid_event(current_listing, &current_winning, target_amount)
                 .await
                 .map_err(|e| PlaceBidError::DatabaseError(e.to_string()))?;
@@ -880,10 +869,10 @@ impl AuctionService {
     async fn require_active_listing(
         &self,
         listing_id: &str,
-    ) -> Result<Option<ListingSummary>, String> {
-        let Some(catalog_client) = &self.catalog_client else {
-            return Ok(None);
-        };
+    ) -> Result<ListingSummary, String> {
+        let catalog_client = self.catalog_client.as_ref().ok_or_else(|| {
+            "Catalogue service is not configured".to_string()
+        })?;
 
         let listing = catalog_client
             .get_listing_summary(listing_id)
@@ -894,7 +883,7 @@ impl AuctionService {
             return Err("Listing is not active".to_string());
         }
 
-        Ok(Some(listing))
+        Ok(listing)
     }
 
     fn status_to_string(&self, status: crate::listing_auction_session::ListingAuctionSessionStatus) -> String {
@@ -937,6 +926,7 @@ impl AuctionService {
         let payload = serde_json::json!({
             "auctionId": auction.id,
             "listingId": auction.listing_id,
+            "sellerId": auction.seller_id,
             "bidId": bid.id,
             "bidderId": bid.bidder_id,
             "amountCents": bid.bid_amount_cents,
@@ -971,6 +961,7 @@ impl AuctionService {
         let payload = serde_json::json!({
             "auctionId": auction.id,
             "listingId": auction.listing_id,
+            "sellerId": auction.seller_id,
             "previousBidderId": previous_bid.bidder_id,
             "amountCents": new_amount_cents,
             "currentPrice": new_amount_cents,

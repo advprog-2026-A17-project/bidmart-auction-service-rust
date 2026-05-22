@@ -7,6 +7,22 @@ use bidmart_auction_service_rust::persistence::repositories::{
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
+mod common;
+use common::always_active_catalog;
+
+fn test_auction_service(
+    listing_auction_session_repo: ListingAuctionSessionRepository,
+    bid_repo: BidRepository,
+    outbox_repo: OutboxRepository,
+) -> AuctionService {
+    AuctionService::new_with_catalog(
+        listing_auction_session_repo,
+        bid_repo,
+        outbox_repo,
+        always_active_catalog(),
+    )
+}
+
 async fn setup_test_db() -> AnyPool {
     let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
@@ -38,7 +54,7 @@ async fn test_service_place_bid() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
 
     // Create test auction
     let auction_id = Uuid::new_v4().to_string();
@@ -83,6 +99,7 @@ async fn test_service_place_bid() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "BidPlaced");
     assert!(events[0].payload.contains("\"listingId\":\"listing-1\""));
+    assert!(events[0].payload.contains("\"sellerId\":\"seller-1\""));
     assert!(events[0].payload.contains("\"amountCents\":1500"));
 }
 
@@ -92,7 +109,7 @@ async fn place_bid_publishes_outbid_event_when_previous_bidder_outbid() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -130,6 +147,7 @@ async fn place_bid_publishes_outbid_event_when_previous_bidder_outbid() {
         .filter(|event| event.event_type == "Outbid")
         .collect();
     assert_eq!(outbid_events.len(), 1);
+    assert!(outbid_events[0].payload.contains("\"sellerId\":\"seller-1\""));
     assert!(outbid_events[0].payload.contains("\"previousBidderId\":\"user-1\""));
     assert!(outbid_events[0].payload.contains("\"amountCents\":1700"));
 }
@@ -140,7 +158,7 @@ async fn place_bid_retry_with_same_bid_details_is_idempotent() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -189,7 +207,7 @@ async fn test_service_place_bid_on_nonexistent_auction() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo, bid_repo, outbox_repo);
 
     let result = service
         .place_bid_and_persist("nonexistent-auction", "user-1", 1500, 1_700_000_010i64)
@@ -205,7 +223,7 @@ async fn test_service_get_auction_with_bids() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     // Create test auction
     let auction_id = Uuid::new_v4().to_string();
@@ -260,7 +278,7 @@ async fn test_place_bid_rejects_bid_below_starting_price() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -297,7 +315,7 @@ async fn test_place_bid_rejects_bid_below_previous_plus_increment() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -340,7 +358,7 @@ async fn test_place_bid_rejects_seller_bidding() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -382,7 +400,7 @@ async fn test_place_proxy_bid_rejects_seller_bidding() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -417,7 +435,7 @@ async fn test_place_bid_triggers_anti_sniping_extension() {
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
 
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -464,7 +482,7 @@ async fn close_auction_publishes_auction_ended_outbox_event() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
 
     let auction_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
@@ -514,7 +532,7 @@ async fn close_auction_unsold_publishes_auction_ended_without_winner_id() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
 
     let auction_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();

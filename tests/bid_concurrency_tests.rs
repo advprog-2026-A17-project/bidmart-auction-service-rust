@@ -12,6 +12,23 @@ use bidmart_auction_service_rust::persistence::repositories::{
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
+mod common;
+use common::always_active_catalog;
+
+fn wallet_auction_service(
+    listing_auction_session_repo: ListingAuctionSessionRepository,
+    bid_repo: BidRepository,
+    outbox_repo: OutboxRepository,
+) -> AuctionService {
+    AuctionService::new_with_clients(
+        listing_auction_session_repo,
+        bid_repo,
+        outbox_repo,
+        Some(Arc::new(DelayingWalletClient)),
+        Some(always_active_catalog()),
+    )
+}
+
 #[derive(Debug)]
 struct DelayingWalletClient;
 
@@ -80,12 +97,7 @@ async fn concurrent_bids_on_same_auction_do_not_overwrite_highest_bid_with_stale
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new_with_wallet(
-        listing_auction_session_repo.clone(),
-        bid_repo,
-        outbox_repo,
-        Arc::new(DelayingWalletClient),
-    );
+    let service = wallet_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -142,17 +154,15 @@ async fn separate_service_instances_do_not_overwrite_highest_bid_with_stale_stat
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool.clone());
-    let first_instance = AuctionService::new_with_wallet(
+    let first_instance = wallet_auction_service(
         listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo.clone(),
-        Arc::new(DelayingWalletClient),
     );
-    let second_instance = AuctionService::new_with_wallet(
+    let second_instance = wallet_auction_service(
         listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
-        Arc::new(DelayingWalletClient),
     );
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -208,12 +218,7 @@ async fn proxy_bid_auto_counters_later_standard_bid() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool.clone());
-    let service = AuctionService::new_with_wallet(
-        listing_auction_session_repo.clone(),
-        bid_repo.clone(),
-        outbox_repo,
-        Arc::new(DelayingWalletClient),
-    );
+    let service = wallet_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
     let now = 1_700_000_000i64;
@@ -259,17 +264,15 @@ async fn concurrent_proxy_bids_across_instances_resolve_deterministically() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool.clone());
-    let first_instance = AuctionService::new_with_wallet(
+    let first_instance = wallet_auction_service(
         listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo.clone(),
-        Arc::new(DelayingWalletClient),
     );
-    let second_instance = AuctionService::new_with_wallet(
+    let second_instance = wallet_auction_service(
         listing_auction_session_repo.clone(),
         bid_repo.clone(),
         outbox_repo,
-        Arc::new(DelayingWalletClient),
     );
 
     let auction_id = uuid::Uuid::new_v4().to_string();

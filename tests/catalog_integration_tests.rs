@@ -122,6 +122,33 @@ async fn create_auction_rejects_inactive_catalog_listing() {
 }
 
 #[tokio::test]
+async fn create_auction_rejects_when_catalog_client_is_not_configured() {
+    let command = create_command();
+    let pool = setup_test_db().await;
+    let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
+    let bid_repo = BidRepository::new(pool.clone());
+    let outbox_repo = OutboxRepository::new(pool);
+    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+
+    let result = service.create_auction(command).await;
+
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Catalogue service is not configured")
+    );
+    assert!(
+        listing_auction_session_repo
+            .list_all()
+            .await
+            .expect("list auctions")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn create_auction_rejects_catalog_seller_mismatch() {
     let command = create_command();
     let catalog_client = Arc::new(MockCatalogClient::new(ListingSummary {

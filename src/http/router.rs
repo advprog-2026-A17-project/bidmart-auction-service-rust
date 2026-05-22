@@ -374,12 +374,13 @@ async fn place_proxy_bid(
     headers: HeaderMap,
     Json(request): Json<PlaceProxyBidRequest>,
 ) -> Result<(StatusCode, Json<BidResponse>), ApiError> {
+    let start = Instant::now();
     let bidder_id = resolve_trusted_user_id(&headers, request.bidder_id(), "bidder_id")?;
     let max_bid_amount_cents = request
         .max_bid_amount_cents()
         .ok_or_else(|| ApiError::bad_request("max_bid_amount is required"))?;
 
-    let bid = state
+    let result = state
         .auction_service
         .place_proxy_bid_and_persist(
             &listing_id,
@@ -387,7 +388,10 @@ async fn place_proxy_bid(
             max_bid_amount_cents,
             chrono::Utc::now().timestamp(),
         )
-        .await?;
+        .await;
+    METRICS.record_request(start.elapsed().as_micros() as u64, result.is_err());
+    let bid = result?;
+    METRICS.bids_placed.fetch_add(1, Ordering::Relaxed);
 
     Ok((StatusCode::CREATED, Json(bid.into())))
 }

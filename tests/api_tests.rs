@@ -11,6 +11,22 @@ use bidmart_auction_service_rust::persistence::repositories::{
 };
 use bidmart_auction_service_rust::service::auction_service::AuctionService;
 
+mod common;
+use common::always_active_catalog;
+
+fn test_auction_service(
+    listing_auction_session_repo: ListingAuctionSessionRepository,
+    bid_repo: BidRepository,
+    outbox_repo: OutboxRepository,
+) -> AuctionService {
+    AuctionService::new_with_catalog(
+        listing_auction_session_repo,
+        bid_repo,
+        outbox_repo,
+        always_active_catalog(),
+    )
+}
+
 async fn setup_test_db() -> AnyPool {
     let pool = bidmart_auction_service_rust::server::connect_pool("sqlite::memory:")
         .await
@@ -41,7 +57,7 @@ async fn create_auction_returns_created_auction_response() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -111,7 +127,7 @@ async fn api_v1_create_auction_rejects_unsupported_future_auction_type() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -158,7 +174,7 @@ async fn api_v1_create_auction_rejects_recognized_but_disabled_auction_type() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -205,7 +221,7 @@ async fn api_v1_create_auction_accepts_gateway_payload_and_persists_cents() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let start_time = chrono::DateTime::<chrono::Utc>::from_timestamp(1_900_000_000, 0)
@@ -272,7 +288,7 @@ async fn api_v1_create_auction_uses_trusted_gateway_user_header() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -322,7 +338,7 @@ async fn api_v1_create_auction_rejects_conflicting_gateway_seller_header() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo, bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo, bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -358,7 +374,7 @@ async fn api_v1_create_auction_accepts_frontend_numeric_camel_case_timestamps() 
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -410,7 +426,7 @@ async fn get_auction_by_id_returns_auction_response() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -470,7 +486,7 @@ async fn api_v1_get_auction_by_id_returns_gateway_compatible_response() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -530,7 +546,7 @@ async fn api_v1_list_auctions_returns_gateway_compatible_page() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
@@ -613,7 +629,7 @@ async fn place_bid_returns_created_bid_response_and_enqueues_outbox_event() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo.clone());
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -699,7 +715,7 @@ async fn api_rejects_client_timestamp_spoofing_by_using_server_time() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -750,7 +766,7 @@ async fn api_v1_place_bid_accepts_gateway_payload_and_returns_gateway_response()
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -818,7 +834,7 @@ async fn api_v1_place_bid_uses_trusted_gateway_user_header() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -875,7 +891,7 @@ async fn api_v1_place_bid_rejects_conflicting_gateway_bidder_header() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -926,7 +942,7 @@ async fn api_v1_place_bid_rejects_seller_bidding_own_auction() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -975,7 +991,7 @@ async fn api_v1_place_proxy_bid_rejects_seller_bidding_own_auction() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -1024,7 +1040,7 @@ async fn list_bids_returns_bid_history_for_auction() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -1102,7 +1118,7 @@ async fn list_bids_cursor_returns_paginated_bid_history() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -1211,7 +1227,7 @@ async fn place_proxy_bid_places_increment_over_current_winner() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -1276,7 +1292,7 @@ async fn api_v1_close_auction_marks_won_when_reserve_is_met() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo.clone(), outbox_repo);
     let app = create_router(service);
 
     let auction_id = uuid::Uuid::new_v4().to_string();
@@ -1344,7 +1360,7 @@ async fn api_v1_pending_closure_returns_expired_unprocessed_auctions() {
     let listing_auction_session_repo = ListingAuctionSessionRepository::new(pool.clone());
     let bid_repo = BidRepository::new(pool.clone());
     let outbox_repo = OutboxRepository::new(pool);
-    let service = AuctionService::new(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
+    let service = test_auction_service(listing_auction_session_repo.clone(), bid_repo, outbox_repo);
     let app = create_router(service);
 
     let now = chrono::Utc::now().timestamp();
